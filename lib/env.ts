@@ -21,15 +21,12 @@ export const env = createEnv({
   /*
    * Specify what values should be validated by your schemas above.
    *
-   * If you're using Next.js < 13.4.4, you'll need to specify the runtimeEnv manually
-   * For Next.js >= 13.4.4, you can use the experimental__runtimeEnv option and
-   * only specify client-side variables.
+   * For scripts and non-Next.js contexts, we need to specify runtimeEnv explicitly
+   * For Next.js contexts, experimental__runtimeEnv handles client-side variables
    */
-  // runtimeEnv: {
-  //   DATABASE_URL: process.env.DATABASE_URL,
-  //   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-  // },
-  experimental__runtimeEnv: {
+  runtimeEnv: {
+    DATABASE_URL: process.env.DATABASE_URL,
+    NODE_ENV: process.env.NODE_ENV,
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
   },
   /*
