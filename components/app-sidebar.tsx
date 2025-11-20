@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import {
-  GalleryVerticalEnd,
   Image as ImageIcon,
   ChevronsUpDown,
   CreditCard,
@@ -20,7 +19,6 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarGroupContent,
 } from "@/components/ui/sidebar"
 import {
@@ -54,12 +52,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <GalleryVerticalEnd className="size-4" />
+                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-linear-to-br from-primary to-purple-600 text-white ring-1 ring-white/10">
+                  <Sparkles className="size-4 fill-white/20" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-semibold">Image Gen</span>
-                  <span className="truncate text-xs">Professional</span>
+                  <span className="truncate font-bold bg-clip-text text-transparent bg-linear-to-r from-foreground to-foreground/80">
+                    ImageGen Pro
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    AI 创意工坊
+                  </span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -68,14 +70,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-            <SidebarGroupLabel>Platform</SidebarGroupLabel>
+            {/* Removed "Platform" label for a cleaner, more modern look */}
             <SidebarGroupContent>
                 <SidebarMenu>
                     <SidebarMenuItem>
                         <SidebarMenuButton asChild isActive={pathname === '/' || pathname.startsWith('/task')}>
                             <Link href="/">
-                                <ImageIcon />
-                                <span>任务列表</span>
+                                <ImageIcon className="text-muted-foreground group-data-[active=true]:text-primary" />
+                                <span className="font-medium">任务列表</span>
                             </Link>
                         </SidebarMenuButton>
                     </SidebarMenuItem>
