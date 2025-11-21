@@ -1,9 +1,11 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
+
 import { env } from '../lib/env'
+
 import { drizzleLogger } from './logger'
-import * as schema from './schema'
 import * as relations from './relation'
+import * as schema from './schema'
 
 const globalForDb = globalThis as unknown as {
   conn: Pool | undefined

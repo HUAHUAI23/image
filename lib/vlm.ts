@@ -5,8 +5,9 @@
  * Implemented with LangChain OpenAI SDK
  */
 
-import { ChatOpenAI } from '@langchain/openai'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
+import { ChatOpenAI } from '@langchain/openai'
+
 import { env } from '@/lib/env'
 import { logger as baseLogger } from '@/lib/logger'
 
@@ -25,7 +26,6 @@ const vlmClient = new ChatOpenAI({
     },
   },
   model: env.ARK_MODEL,
-  temperature: 0.7,
 })
 
 // ============================================================================
@@ -83,7 +83,6 @@ export async function analyzeImage(imageUrl: string): Promise<string> {
     if (!content || typeof content !== 'string') {
       throw new Error('ARK API returned empty or invalid analysis content')
     }
-
 
     return content
   } catch (error) {

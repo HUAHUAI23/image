@@ -1,10 +1,16 @@
 /**
  * Volcengine TOS (Object Storage) Service
  *
- * Handles file uploads to Volcengine TOS with automatic path organization
+ * Handles file uploads to Volcengine TOS with structured path organization
+ *
+ * Path Structure:
+ * - Original images: originalImage/{userId}/{taskId}/filename.jpg
+ * - Generated images: generatedImage/{userId}/{taskId}/filename.jpg
+ * - Temporary uploads: originalImage/{userId}/temp-{timestamp}/filename.jpg
  */
 
-import { TosClient, ACLType } from '@volcengine/tos-sdk'
+import { ACLType,TosClient } from '@volcengine/tos-sdk'
+
 import { env } from './env'
 import { convertToJpeg } from './image-utils'
 
@@ -19,38 +25,38 @@ const tosClient = new TosClient({
 const bucketName = env.VOLCENGINE_BUCKET_NAME
 
 /**
- * Upload file to TOS
+ * Upload file to TOS with structured path
  *
  * @param buffer - File buffer to upload
  * @param filename - Original filename
- * @param taskName - Task name (used as folder prefix)
- * @param folder - Subfolder name (e.g., "originalImage", "generatedImage")
+ * @param userId - User ID for path organization
+ * @param taskId - Task ID for path organization (optional for temporary uploads)
+ * @param folder - Folder type: "originalImage" or "generatedImage"
  * @returns Public URL of the uploaded file
  */
 export async function uploadToTOS(
   buffer: Buffer,
   filename: string,
-  taskName: string,
+  userId: number,
+  taskId: number | string,
   folder: 'originalImage' | 'generatedImage'
 ): Promise<string> {
   // Convert image to JPEG format for API compatibility
   const jpegBuffer = await convertToJpeg(buffer)
 
-  // Clean task name (remove special characters)
-  const cleanTaskName = taskName.replace(/[^\w\-]/g, '_')
-
   // Replace file extension with .jpg
   const jpegFilename = filename.replace(/\.[^.]+$/, '.jpg')
 
-  // Build object key: taskName/folder/filename
-  const objectKey = `${cleanTaskName}/${folder}/${jpegFilename}`
+  // Build object key: folder/userId/taskId/filename
+  // Example: originalImage/123/456/image.jpg or originalImage/123/temp-1234567890/image.jpg
+  const objectKey = `${folder}/${userId}/${taskId}/${jpegFilename}`
 
   // Upload to TOS with public-read ACL
   await tosClient.putObject({
     bucket: bucketName,
     key: objectKey,
     body: jpegBuffer,
-    acl: ACLType.ACLPublicRead, // Set public read ACL
+    acl: ACLType.ACLPublicRead,
   })
 
   // Return public URL
@@ -64,20 +70,34 @@ export async function uploadToTOS(
  * Upload file from File object
  *
  * @param file - File object from form upload
- * @param taskName - Task name (used as folder prefix)
- * @param folder - Subfolder name
+ * @param userId - User ID
+ * @param taskId - Task ID (or temp identifier)
+ * @param folder - Folder type
  * @returns Public URL of the uploaded file
  */
 export async function uploadFileToTOS(
   file: File,
-  taskName: string,
+  userId: number,
+  taskId: number | string,
   folder: 'originalImage' | 'generatedImage'
 ): Promise<string> {
   const bytes = await file.arrayBuffer()
   const buffer = Buffer.from(bytes)
   const filename = `${Date.now()}-${file.name}`
 
-  return uploadToTOS(buffer, filename, taskName, folder)
+  return uploadToTOS(buffer, filename, userId, taskId, folder)
+}
+
+/**
+ * Upload file to temporary location (before task is created)
+ *
+ * @param file - File object from form upload
+ * @param userId - User ID
+ * @returns Public URL of the uploaded file
+ */
+export async function uploadFileToTempTOS(file: File, userId: number): Promise<string> {
+  const tempId = `temp-${Date.now()}`
+  return uploadFileToTOS(file, userId, tempId, 'originalImage')
 }
 
 /**

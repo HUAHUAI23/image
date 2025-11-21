@@ -2,25 +2,22 @@
 
 import * as React from "react"
 import {
-  Image as ImageIcon,
   ChevronsUpDown,
   CreditCard,
+  Image as ImageIcon,
   LogOut,
   Sparkles
 } from "lucide-react"
+import Link from "next/link"
+import { usePathname } from "next/navigation"
 
+import { logoutAction } from "@/app/actions/auth"
+import { useModal } from "@/components/providers/modal-provider"
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarRail,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarGroup,
-  SidebarGroupContent,
-} from "@/components/ui/sidebar"
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,16 +27,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar"
-
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { logoutAction } from "@/app/actions/auth"
-
-import { useModal } from "@/components/providers/modal-provider"
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+} from "@/components/ui/sidebar"
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname()

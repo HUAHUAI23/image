@@ -1,8 +1,9 @@
 'use client'
 
-import { createContext, useContext, useState, ReactNode } from 'react'
-import { CreateTaskModal } from '@/components/modals/create-task-modal'
+import { createContext, ReactNode,useContext, useState } from 'react'
+
 import { BillingModal } from '@/components/modals/billing-modal'
+import { CreateTaskModal } from '@/components/modals/create-task-modal'
 
 interface ModalContextType {
   setCreateTaskOpen: (open: boolean) => void

@@ -1,15 +1,16 @@
 'use client'
 
-import { getTasksAction } from '@/app/actions/task'
-import { Card, CardContent, CardFooter } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { CreateTaskButton } from '@/components/create-task-button'
-import Image from 'next/image'
-import { ImageIcon, Clock, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useEffect, useState } from 'react'
-import { useModal } from '@/components/providers/modal-provider'
+import { AlertCircle, CheckCircle2,Clock, ImageIcon } from 'lucide-react'
+import Image from 'next/image'
+
+import { getTasksAction } from '@/app/actions/task'
+import { CreateTaskButton } from '@/components/create-task-button'
 import { ImageGalleryModal } from '@/components/modals/image-gallery-modal'
+import { useModal } from '@/components/providers/modal-provider'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { SidebarTrigger } from "@/components/ui/sidebar"
 
 type Task = {
   id: number

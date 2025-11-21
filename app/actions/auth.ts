@@ -1,12 +1,14 @@
 'use server'
 
-import { z } from 'zod'
-import { db } from '@/db'
-import { users, userIdentities, accounts } from '@/db/schema'
-import { eq, and } from 'drizzle-orm'
-import { hashPassword, verifyPassword } from '@/lib/password'
-import { createSession, deleteSession } from '@/lib/auth'
+import { and,eq } from 'drizzle-orm'
 import { redirect } from 'next/navigation'
+import { z } from 'zod'
+
+import { db } from '@/db'
+import { accounts,userIdentities, users } from '@/db/schema'
+import { createSession, deleteSession } from '@/lib/auth'
+import { env } from '@/lib/env'
+import { hashPassword, verifyPassword } from '@/lib/password'
 
 const loginSchema = z.object({
   username: z.string().min(3, '用户名至少需要3个字符'),
@@ -57,10 +59,7 @@ export async function loginAction(prevState: any, formData: FormData) {
       const passwordHash = await hashPassword(password)
 
       await db.transaction(async (tx) => {
-        const [newUser] = await tx
-          .insert(users)
-          .values({ username })
-          .returning()
+        const [newUser] = await tx.insert(users).values({ username }).returning()
 
         await tx.insert(userIdentities).values({
           userId: newUser.id,
@@ -72,7 +71,7 @@ export async function loginAction(prevState: any, formData: FormData) {
 
         await tx.insert(accounts).values({
           userId: newUser.id,
-          balance: 100, // Give some initial balance for testing? Or 0. Let's give 100.
+          balance: env.GIFT_AMOUNT, // Give some initial balance for testing? Or 0.
         })
 
         await createSession(newUser.id)

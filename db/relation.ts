@@ -1,6 +1,7 @@
 // db/relations.ts
 import { relations } from 'drizzle-orm'
-import { users, userIdentities, accounts, tasks, transactions, promptTemplates } from './schema'
+
+import { accounts, promptTemplates,tasks, transactions, userIdentities, users } from './schema'
 
 // ==================== Relations 定义 ====================
 

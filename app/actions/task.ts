@@ -1,12 +1,13 @@
 'use server'
 
-import { z } from 'zod'
-import { db } from '@/db'
-import { tasks, accounts, transactions, prices } from '@/db/schema'
-import { eq, desc } from 'drizzle-orm'
-import { getSession } from '@/lib/auth'
+import { and,desc, eq } from 'drizzle-orm'
 import { redirect } from 'next/navigation'
-import { uploadFileToTOS } from '@/lib/tos'
+import { z } from 'zod'
+
+import { db } from '@/db'
+import { accounts, prices,tasks, transactions } from '@/db/schema'
+import { getSession } from '@/lib/auth'
+import { formatCurrency } from '@/lib/const'
 import { logger as baseLogger } from '@/lib/logger'
 const logger = baseLogger.child({ module: 'app/actions/task' })
 
@@ -56,7 +57,10 @@ export async function createTaskAction(prevState: any, formData: FormData) {
 
   if (!originalImageUrl && file && file.size > 0) {
     try {
-      originalImageUrl = await uploadFileToTOS(file, name, 'originalImage')
+      // Upload to temporary location since task doesn't exist yet
+      // Path: originalImage/{userId}/temp-{timestamp}/filename.jpg
+      const { uploadFileToTempTOS } = await import('@/lib/tos')
+      originalImageUrl = await uploadFileToTempTOS(file, session.userId)
     } catch (e) {
       logger.error(e, 'File upload failed')
       return { message: '图片上传失败' }
@@ -74,12 +78,24 @@ export async function createTaskAction(prevState: any, formData: FormData) {
 
   try {
     return await db.transaction(async (tx) => {
-      // Get price
+      // Get price configuration (only per_image pricing supported)
       const priceRecord = await tx.query.prices.findFirst({
-        where: eq(prices.taskType, type),
+        where: and(eq(prices.taskType, type), eq(prices.priceUnit, 'per_image')),
       })
 
-      const cost = priceRecord ? priceRecord.price : 10 // Default 10 if not set
+      if (!priceRecord) {
+        return {
+          message: '价格配置未找到，请联系管理员配置 per_image 计费方式',
+        }
+      }
+
+      // Calculate total cost: price per image × number of images
+      const pricePerImage = priceRecord.price
+      const totalCost = pricePerImage * imageNumber
+
+      logger.info(
+        `[Task] Creating task: ${imageNumber} images × ${pricePerImage} = ${totalCost}`
+      )
 
       // Check balance
       const account = await tx.query.accounts.findFirst({
@@ -88,8 +104,10 @@ export async function createTaskAction(prevState: any, formData: FormData) {
 
       if (!account) throw new Error('Account not found')
 
-      if (account.balance < cost) {
-        return { message: '余额不足，请充值' }
+      if (account.balance < totalCost) {
+        return {
+          message: `余额不足，需要 ${formatCurrency(totalCost)}，当前余额 ${formatCurrency(account.balance)}`,
+        }
       }
 
       // Create Task
@@ -104,22 +122,27 @@ export async function createTaskAction(prevState: any, formData: FormData) {
           userPrompt: userPrompt || null,
           originalImageUrl: originalImageUrl || null,
           imageNumber,
+          priceUnit: 'per_image', // Record pricing model for refund calculation
         })
         .returning()
 
-      // Deduct Balance
-      const newBalance = account.balance - cost
+      // Deduct Balance (pre-charge for all requested images)
+      const newBalance = account.balance - totalCost
       await tx.update(accounts).set({ balance: newBalance }).where(eq(accounts.id, account.id))
 
-      // Create Transaction
+      // Create Transaction Record
       await tx.insert(transactions).values({
         accountId: account.id,
         taskId: newTask.id,
-        amount: cost,
+        amount: totalCost,
         type: 'charge',
         balanceBefore: account.balance,
         balanceAfter: newBalance,
       })
+
+      logger.info(
+        `[Task] Task ${newTask.id} created, charged ${totalCost} (${imageNumber} × ${pricePerImage}), balance: ${account.balance} → ${newBalance}`
+      )
 
       return { success: true, taskId: newTask.id }
     })
@@ -143,4 +166,11 @@ export async function getTasksAction() {
     where: eq(tasks.accountId, account.id),
     orderBy: [desc(tasks.createdAt)],
   })
+}
+
+export async function getPricesAction() {
+  const session = await getSession()
+  if (!session) return []
+
+  return await db.query.prices.findMany()
 }

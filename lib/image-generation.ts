@@ -1,31 +1,48 @@
 /**
  * Image Generation Service
  *
+ * Enterprise-grade image generation with:
+ * - Rate limiting to prevent 429 errors
+ * - Exponential backoff retry with jitter
+ * - Real timeout control with AbortController
+ * - Concurrent request management
+ * - Detailed error tracking
+ *
  * Uses Seedream4.0 via Volcengine ARK API
- * Supports text-to-image and image-to-image generation
- * Implemented with LangChain OpenAI SDK
  */
 
-import { ChatOpenAI } from '@langchain/openai'
 import { Liquid } from 'liquidjs'
+
 import { env } from '@/lib/env'
 import { logger as baseLogger } from '@/lib/logger'
+
 const logger = baseLogger.child({ module: 'lib/image-generation' })
 
-// Initialize Liquid template engine
-const liquid = new Liquid()
-
 // ============================================================================
-// LangChain ChatOpenAI Client for Seedream API
+// Configuration
 // ============================================================================
 
-const seedreamClient = new ChatOpenAI({
-  openAIApiKey: env.SEEDREAM_API_KEY,
-  configuration: {
-    baseURL: env.SEEDREAM_BASE_URL,
-  },
-  model: env.SEEDREAM_MODEL,
-})
+/**
+ * Generation configuration with sensible defaults
+ */
+const CONFIG = {
+  /** Default number of images to generate */
+  DEFAULT_IMAGE_COUNT: 1,
+  /** Default image size */
+  DEFAULT_SIZE: '2k' as const,
+  /** Request timeout in seconds */
+  TIMEOUT_SECONDS: 120,
+  /** Maximum retry attempts per image */
+  MAX_RETRIES: 3,
+  /** Initial retry delay in ms */
+  INITIAL_RETRY_DELAY: 2000,
+  /** Maximum retry delay in ms (cap for exponential backoff) */
+  MAX_RETRY_DELAY: 30000,
+  /** Rate limit: max requests per time window */
+  RATE_LIMIT_MAX_REQUESTS: 20,
+  /** Rate limit: time window in ms */
+  RATE_LIMIT_WINDOW_MS: 1000,
+} as const
 
 // ============================================================================
 // Types
@@ -34,9 +51,9 @@ const seedreamClient = new ChatOpenAI({
 export interface GenerateImagesOptions {
   /** Original image URL (for image-to-image) */
   originalImageUrl?: string
-  /** User custom prompt (will be used as {{ prompt }} in template) */
+  /** User custom prompt */
   userPrompt: string
-  /** Template prompt from database (with {{ prompt }} placeholder) */
+  /** Template prompt with {{ prompt }} placeholder */
   templatePrompt?: string
   /** Number of images to generate */
   imageCount?: number
@@ -44,7 +61,7 @@ export interface GenerateImagesOptions {
   size?: string
   /** Timeout per image in seconds */
   timeout?: number
-  /** Maximum concurrent requests (default: SEEDREAM_CONCURRENCY env var, fallback: 20) */
+  /** Maximum concurrent requests */
   concurrency?: number
 }
 
@@ -57,232 +74,368 @@ export interface GeneratedImage {
   success: boolean
   /** Error message if failed */
   error?: string
+  /** Number of retry attempts used */
+  attempts?: number
 }
 
 export interface GenerateImagesResult {
-  /** Successfully generated image URLs */
+  /** Successfully generated image URLs (in order) */
   successUrls: string[]
   /** Failed image generation details */
-  failures: Array<{ index: number; error: string }>
+  failures: Array<{ index: number; error: string; attempts: number }>
   /** Total requested count */
   totalRequested: number
   /** Successfully generated count */
   successCount: number
 }
 
+interface APIResponse {
+  data?: Array<{ url?: string }>
+  error?: { message?: string; code?: string }
+}
+
 // ============================================================================
-// Prompt Rendering
+// Liquid Template Engine
 // ============================================================================
+
+const liquid = new Liquid()
 
 /**
  * Render final prompt from template and user prompt
  *
- * If templatePrompt is provided, use liquidjs to render with {{ prompt }} placeholder
- * Otherwise, use userPrompt directly
+ * @param userPrompt - User's prompt text
+ * @param templatePrompt - Optional template with {{ prompt }} placeholder
+ * @returns Rendered prompt
  */
-async function renderPrompt(options: GenerateImagesOptions): Promise<string> {
-  const { userPrompt, templatePrompt } = options
+async function renderPrompt(userPrompt: string, templatePrompt?: string): Promise<string> {
+  if (!templatePrompt) return userPrompt
 
-  // If template is provided, render it with userPrompt as {{ prompt }} variable
-  if (templatePrompt) {
-    try {
-      return await liquid.parseAndRender(templatePrompt, { prompt: userPrompt })
-    } catch (error) {
-      console.error('[ImageGen] Template render failed:', error)
-      // Fallback to userPrompt if template rendering fails
-      return userPrompt
-    }
-  }
-
-  // Otherwise, use userPrompt directly
-  return userPrompt
-}
-
-// ============================================================================
-// Image Size Detection
-// ============================================================================
-
-/**
- * Detect image size from URL
- * Returns size string like "1024x768" or null if failed
- */
-async function detectImageSize(imageUrl: string): Promise<string | null> {
   try {
-    const response = await fetch(imageUrl, { method: 'HEAD' })
-    if (!response.ok) {
-      console.warn('[ImageGen] Failed to fetch image headers:', response.statusText)
-      return null
-    }
-
-    // Try to get actual image to detect size
-    const imageResponse = await fetch(imageUrl)
-    const blob = await imageResponse.blob()
-
-    // Use browser Image API to get dimensions (Node.js would need sharp or similar)
-    // For server-side, we'll skip size detection for now
-    logger.warn('[ImageGen] Image size detection not implemented for server-side')
-    return null
+    return await liquid.parseAndRender(templatePrompt, { prompt: userPrompt })
   } catch (error) {
-    logger.error(error, 'Size detection failed')
-    return null
+    logger.error(error, 'Template render failed, falling back to user prompt')
+    return userPrompt
   }
 }
 
 // ============================================================================
-// Image Generation via Raw HTTP
+// Rate Limiter (Token Bucket Algorithm)
 // ============================================================================
 
 /**
- * Generate a single image using raw HTTP request
- * (OpenAI SDK doesn't support custom image generation parameters)
+ * Token bucket rate limiter to prevent API rate limit errors (429)
  *
- * @param prompt - Final prompt for generation
+ * Ensures requests are spread over time instead of bursting.
+ * Example: 200 requests spread over 10 seconds instead of instant burst.
+ */
+class RateLimiter {
+  private tokens: number
+  private lastRefill: number
+
+  constructor(
+    private maxTokens: number,
+    private refillInterval: number // ms
+  ) {
+    this.tokens = maxTokens
+    this.lastRefill = Date.now()
+  }
+
+  /**
+   * Wait until a token is available, then consume it
+   */
+  async acquire(): Promise<void> {
+    while (true) {
+      this.refill()
+
+      if (this.tokens >= 1) {
+        this.tokens -= 1
+        return
+      }
+
+      // Wait for next refill opportunity
+      const waitTime = Math.min(100, this.refillInterval / this.maxTokens)
+      await new Promise((resolve) => setTimeout(resolve, waitTime))
+    }
+  }
+
+  /**
+   * Refill tokens based on elapsed time
+   */
+  private refill(): void {
+    const now = Date.now()
+    const elapsed = now - this.lastRefill
+
+    if (elapsed >= this.refillInterval) {
+      const tokensToAdd = Math.floor(elapsed / this.refillInterval) * this.maxTokens
+      this.tokens = Math.min(this.maxTokens, this.tokens + tokensToAdd)
+      this.lastRefill = now
+    }
+  }
+
+  /**
+   * Create a rate limiter from requests per time window
+   *
+   * @param maxRequests - Maximum requests allowed per window
+   * @param windowMs - Time window in milliseconds
+   */
+  static fromRequestsPerWindow(maxRequests: number, windowMs: number): RateLimiter {
+    return new RateLimiter(maxRequests, windowMs)
+  }
+}
+
+// ============================================================================
+// Error Handling
+// ============================================================================
+
+/**
+ * Determine if an error is retryable
+ *
+ * Retryable errors: network issues, timeouts, rate limits, server errors (5xx)
+ * Non-retryable: client errors (4xx except 429), auth errors
+ */
+function isRetryableError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase()
+
+    // Network errors
+    if (
+      message.includes('network') ||
+      message.includes('timeout') ||
+      message.includes('econnreset') ||
+      message.includes('enotfound')
+    ) {
+      return true
+    }
+
+    // Rate limit errors (429)
+    if (message.includes('429') || message.includes('rate limit')) {
+      return true
+    }
+
+    // Server errors (5xx)
+    if (
+      message.includes('500') ||
+      message.includes('502') ||
+      message.includes('503') ||
+      message.includes('504')
+    ) {
+      return true
+    }
+
+    // Abort errors (timeout)
+    if (error.name === 'AbortError') {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * Calculate retry delay with exponential backoff and jitter
+ *
+ * Exponential backoff: 2s → 4s → 8s → ...
+ * Jitter (±20%): prevents thundering herd problem
+ *
+ * @param attempt - Current attempt number (1-based)
+ * @returns Delay in milliseconds
+ */
+function calculateRetryDelay(attempt: number): number {
+  const baseDelay = CONFIG.INITIAL_RETRY_DELAY
+  const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), CONFIG.MAX_RETRY_DELAY)
+
+  // Add jitter (±20%) to prevent thundering herd
+  const jitter = exponentialDelay * 0.2 * (Math.random() * 2 - 1)
+
+  return Math.floor(exponentialDelay + jitter)
+}
+
+// ============================================================================
+// Single Image Generation with Retry
+// ============================================================================
+
+/**
+ * Generate a single image with timeout, retry, and error handling
+ *
+ * Features:
+ * - AbortController for real timeout control
+ * - Exponential backoff with jitter
+ * - Smart retry (only retryable errors)
+ * - Rate limiting via rateLimiter
+ *
+ * @param prompt - Final rendered prompt
  * @param options - Generation options
- * @param index - Image index in batch
  * @returns Generated image result
  */
 async function generateSingleImage(
   prompt: string,
-  options: GenerateImagesOptions,
-  index: number
+  options: {
+    originalImageUrl?: string
+    size: string
+    timeout: number
+    index: number
+    rateLimiter: RateLimiter
+  }
 ): Promise<GeneratedImage> {
-  const { originalImageUrl, size = '2k', timeout = 120 } = options
-  const maxRetries = 3
-  let attempts = 0
+  const { originalImageUrl, size, timeout, index, rateLimiter } = options
+  let lastError: Error | null = null
 
-  while (attempts < maxRetries) {
-    attempts++
-    logger.info(`Image ${index + 1}: Attempt ${attempts}/${maxRetries}`)
-
+  for (let attempt = 1; attempt <= CONFIG.MAX_RETRIES; attempt++) {
     try {
-      const startTime = Date.now()
+      logger.info(`Image ${index + 1}: Attempt ${attempt}/${CONFIG.MAX_RETRIES}`)
 
-      // Build request body
-      const requestBody: any = {
-        model: env.SEEDREAM_MODEL,
-        prompt,
-        response_format: 'url',
-        size,
-        n: 1, // Generate one image at a time
-        watermark: false,
-      }
+      // Wait for rate limiter token
+      await rateLimiter.acquire()
 
-      // Add original image for image-to-image
-      if (originalImageUrl) {
-        requestBody.image = [originalImageUrl]
-        requestBody.sequential_image_generation = 'auto'
-      }
+      // Create abort controller for timeout
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), timeout * 1000)
 
-      // Make raw HTTP request to ARK API
-      const response = await fetch(`${env.SEEDREAM_BASE_URL}/images/generations`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${env.SEEDREAM_API_KEY}`,
-        },
-        body: JSON.stringify(requestBody),
-      })
+      try {
+        // Build request body
+        const requestBody: Record<string, any> = {
+          model: env.SEEDREAM_MODEL,
+          prompt,
+          response_format: 'url',
+          size,
+          n: 1,
+          watermark: false,
+        }
 
-      // Check timeout
-      if (Date.now() - startTime >= timeout * 1000) {
-        logger.warn(`Image ${index + 1}: Timeout, retrying...`)
-        continue
-      }
+        // Add original image for image-to-image
+        if (originalImageUrl) {
+          requestBody.image = [originalImageUrl]
+          requestBody.sequential_image_generation = 'auto'
+        }
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`API request failed: ${response.status} ${response.statusText}`)
-      }
+        // Make HTTP request with timeout
+        const response = await fetch(`${env.SEEDREAM_BASE_URL}/images/generations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${env.SEEDREAM_API_KEY}`,
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
+        })
 
-      const result = await response.json()
+        clearTimeout(timeoutId)
 
-      // Extract image URL
-      if (result.data && result.data.length > 0 && result.data[0].url) {
-        const imageUrl = result.data[0].url
-        logger.info(`Image ${index + 1}: Generated successfully`)
+        // Handle non-OK responses
+        if (!response.ok) {
+          const errorText = await response.text()
+          throw new Error(`API error ${response.status}: ${errorText}`)
+        }
+
+        // Parse response
+        const result: APIResponse = await response.json()
+
+        // Extract image URL
+        const imageUrl = result.data?.[0]?.url
+        if (!imageUrl) {
+          throw new Error('No image URL in response')
+        }
+
+        logger.info(`Image ${index + 1}: Generated successfully (attempt ${attempt})`)
 
         return {
           url: imageUrl,
           index,
           success: true,
+          attempts: attempt,
         }
+      } catch (error) {
+        clearTimeout(timeoutId)
+        throw error
       }
-
-      throw new Error('No image URL in response')
     } catch (error) {
-      logger.error(error, `Image ${index + 1}: Generation failed`)
+      lastError = error instanceof Error ? error : new Error(String(error))
+      logger.warn(
+        { error: lastError, attempt, index: index + 1 },
+        `Image ${index + 1}: Attempt ${attempt} failed`
+      )
 
-      if (attempts >= maxRetries) {
-        return {
-          url: '',
-          index,
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        }
+      // Don't retry if it's the last attempt
+      if (attempt >= CONFIG.MAX_RETRIES) {
+        break
       }
 
-      // Wait before retry (exponential backoff)
-      await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempts) * 1000))
+      // Don't retry if error is not retryable
+      if (!isRetryableError(error)) {
+        logger.info(`Image ${index + 1}: Non-retryable error, aborting`)
+        break
+      }
+
+      // Wait before retry with exponential backoff + jitter
+      const delay = calculateRetryDelay(attempt)
+      logger.info(`Image ${index + 1}: Retrying in ${delay}ms...`)
+      await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
 
+  // All retries failed
   return {
     url: '',
     index,
     success: false,
-    error: 'Max retries exceeded',
+    error: lastError?.message || 'Unknown error',
+    attempts: CONFIG.MAX_RETRIES,
   }
 }
 
 // ============================================================================
-// Concurrency Control Helper
+// Concurrent Execution with Limit
 // ============================================================================
 
 /**
- * Execute async tasks with concurrency limit
- * Uses a queue-based approach with no external dependencies
+ * Execute tasks with concurrency limit using worker pool pattern
  *
  * @param tasks - Array of async task functions
  * @param concurrency - Maximum concurrent tasks
  * @returns Array of results in same order as tasks
  */
-async function parallelLimit<T>(
-  tasks: Array<() => Promise<T>>,
-  concurrency: number
-): Promise<T[]> {
+async function parallelLimit<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
   const results: T[] = new Array(tasks.length)
   let index = 0
 
-  // Worker function that processes tasks from the queue
   const worker = async (): Promise<void> => {
     while (index < tasks.length) {
       const currentIndex = index++
-      const task = tasks[currentIndex]
-      try {
-        results[currentIndex] = await task()
-      } catch (error) {
-        // Task should handle its own errors, but catch here as safety
-        logger.error(error, `Task ${currentIndex} failed`)
-        results[currentIndex] = error as T
-      }
+      results[currentIndex] = await tasks[currentIndex]()
     }
   }
 
   // Create worker pool with specified concurrency
   const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker())
 
-  // Wait for all workers to complete
   await Promise.all(workers)
 
   return results
 }
 
 // ============================================================================
-// Parallel Image Generation
+// Main Generation Functions
 // ============================================================================
 
 /**
- * Generate multiple images in parallel with detailed result information
+ * Generate multiple images with detailed error tracking
+ *
+ * This is the main entry point for image generation.
+ *
+ * Features:
+ * - Concurrent generation with configurable limit
+ * - Rate limiting to prevent 429 errors
+ * - Per-image retry with exponential backoff
+ * - Partial success support (some images fail, some succeed)
+ * - Detailed error tracking
+ *
+ * @example
+ * const result = await generateImagesDetailed({
+ *   userPrompt: "A cute cat",
+ *   imageCount: 10,
+ *   concurrency: 5
+ * })
+ * console.log(`Generated ${result.successCount}/${result.totalRequested} images`)
  *
  * @param options - Generation options
  * @returns Detailed generation results including successes and failures
@@ -290,30 +443,41 @@ async function parallelLimit<T>(
 export async function generateImagesDetailed(
   options: GenerateImagesOptions
 ): Promise<GenerateImagesResult> {
-  const { imageCount = env.SEEDREAM_BATCH_SIZE, concurrency = env.SEEDREAM_CONCURRENCY } = options
+  const {
+    userPrompt,
+    templatePrompt,
+    originalImageUrl,
+    imageCount = CONFIG.DEFAULT_IMAGE_COUNT,
+    size = CONFIG.DEFAULT_SIZE,
+    timeout = CONFIG.TIMEOUT_SECONDS,
+    concurrency = env.SEEDREAM_CONCURRENCY,
+  } = options
 
-  logger.info(
-    `Starting parallel generation of ${imageCount} images (concurrency: ${concurrency})`
+  logger.info(`Starting generation: ${imageCount} images (concurrency: ${concurrency})`)
+
+  // Render final prompt from template
+  const prompt = await renderPrompt(userPrompt, templatePrompt)
+  logger.info(`Prompt: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}`)
+
+  // Create rate limiter to prevent 429 errors
+  // Default: 20 requests per second
+  const rateLimiter = RateLimiter.fromRequestsPerWindow(
+    CONFIG.RATE_LIMIT_MAX_REQUESTS,
+    CONFIG.RATE_LIMIT_WINDOW_MS
   )
 
-  // Render final prompt
-  const prompt = await renderPrompt(options)
-  logger.info(`Final prompt: ${prompt.substring(0, 100)}...`)
-
-  // Detect image size if original image is provided
-  if (options.originalImageUrl && !options.size) {
-    const detectedSize = await detectImageSize(options.originalImageUrl)
-    if (detectedSize) {
-      options.size = detectedSize
-      logger.info(`Detected size: ${detectedSize}`)
-    }
-  }
-
-  // Generate all images with concurrency control
+  // Create generation tasks
   const tasks = Array.from({ length: imageCount }, (_, index) => () =>
-    generateSingleImage(prompt, options, index)
+    generateSingleImage(prompt, {
+      originalImageUrl,
+      size,
+      timeout,
+      index,
+      rateLimiter,
+    })
   )
 
+  // Execute with concurrency control
   const results = await parallelLimit(tasks, concurrency)
 
   // Separate successes and failures
@@ -324,11 +488,13 @@ export async function generateImagesDetailed(
   const failures = failedResults.map((r) => ({
     index: r.index,
     error: r.error || 'Unknown error',
+    attempts: r.attempts || 0,
   }))
 
-  logger.info(`Generated ${successfulResults.length}/${imageCount} images successfully`)
+  logger.info(`Completed: ${successfulResults.length}/${imageCount} images succeeded`)
+
   if (failures.length > 0) {
-    logger.info(`${failures.length} images failed`)
+    logger.warn({ failures }, `${failures.length} images failed`)
   }
 
   return {
@@ -340,35 +506,41 @@ export async function generateImagesDetailed(
 }
 
 /**
- * Generate multiple images in parallel (legacy, throws on any failure)
+ * Generate images from text prompt
  *
- * @param options - Generation options
+ * Convenience wrapper for text-to-image generation.
+ *
+ * @param userPrompt - Text prompt for image generation
+ * @param imageCount - Number of images to generate
  * @returns Array of generated image URLs
- * @deprecated Use generateImagesDetailed for better error handling
+ * @throws Error if all images fail to generate
  */
-export async function generateImages(options: GenerateImagesOptions): Promise<string[]> {
-  const result = await generateImagesDetailed(options)
+export async function generateFromText(
+  userPrompt: string,
+  imageCount?: number
+): Promise<string[]> {
+  const result = await generateImagesDetailed({
+    userPrompt,
+    imageCount,
+  })
 
   if (result.successCount === 0) {
     throw new Error('All image generation attempts failed')
   }
 
-  // Return URLs in order
   return result.successUrls
 }
 
 /**
- * Generate images for text-to-image task
- */
-export async function generateFromText(prompt: string, imageCount?: number): Promise<string[]> {
-  return generateImages({
-    userPrompt: prompt,
-    imageCount,
-  })
-}
-
-/**
- * Generate images for image-to-image task
+ * Generate images from image with prompt (image-to-image)
+ *
+ * Convenience wrapper for image-to-image generation.
+ *
+ * @param originalImageUrl - URL of the original image
+ * @param userPrompt - Text prompt for transformation
+ * @param options - Optional template and image count
+ * @returns Array of generated image URLs
+ * @throws Error if all images fail to generate
  */
 export async function generateFromImage(
   originalImageUrl: string,
@@ -378,10 +550,16 @@ export async function generateFromImage(
     imageCount?: number
   }
 ): Promise<string[]> {
-  return generateImages({
+  const result = await generateImagesDetailed({
     originalImageUrl,
     userPrompt,
     templatePrompt: options?.templatePrompt,
     imageCount: options?.imageCount,
   })
+
+  if (result.successCount === 0) {
+    throw new Error('All image generation attempts failed')
+  }
+
+  return result.successUrls
 }

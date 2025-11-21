@@ -1,5 +1,6 @@
-import { SignJWT, jwtVerify } from 'jose'
+import { jwtVerify,SignJWT } from 'jose'
 import { cookies } from 'next/headers'
+
 import { env } from './env'
 
 const secretKey = env.AUTH_SECRET
@@ -31,7 +32,7 @@ export async function getSession() {
   if (!session) return null
   try {
     return await decrypt(session)
-  } catch (error) {
+  } catch (_error) {
     return null
   }
 }

@@ -6,10 +6,11 @@
  * Response: { success: boolean, templates: Template[], error?: string }
  */
 
+import { eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
+
 import { db } from '@/db'
 import { promptTemplates } from '@/db/schema'
-import { eq } from 'drizzle-orm'
 import { getSession } from '@/lib/auth'
 
 export async function GET(request: NextRequest) {

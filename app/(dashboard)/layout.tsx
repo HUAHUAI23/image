@@ -1,6 +1,6 @@
-import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
 import { ModalProvider } from "@/components/providers/modal-provider"
+import { SidebarInset,SidebarProvider } from "@/components/ui/sidebar"
 
 export default function DashboardLayout({
   children,

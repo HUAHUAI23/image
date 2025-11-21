@@ -1,25 +1,33 @@
 // db/schema.ts
+import { sql } from 'drizzle-orm'
 import {
+  bigint,
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
   pgTable,
   serial,
   text,
   timestamp,
-  integer,
-  pgEnum,
-  index,
-  varchar,
-  jsonb,
-  boolean,
   unique,
+  varchar,
 } from 'drizzle-orm/pg-core'
-import { sql } from 'drizzle-orm'
 
 // ==================== 枚举定义 ====================
 
 export const authProviderEnum = pgEnum('auth_provider', ['password', 'google', 'github'])
 export const taskTypeEnum = pgEnum('task_type', ['text_to_image', 'image_to_image'])
-export const taskStatusEnum = pgEnum('task_status', ['pending', 'processing', 'success', 'partial_success', 'failed'])
+export const taskStatusEnum = pgEnum('task_status', [
+  'pending',
+  'processing',
+  'success',
+  'partial_success',
+  'failed',
+])
 export const transactionTypeEnum = pgEnum('transaction_type', ['charge', 'refund'])
+export const priceUnitEnum = pgEnum('price_unit', ['per_image', 'per_token'])
 
 // ==================== 用户相关表 ====================
 
@@ -72,7 +80,7 @@ export const accounts = pgTable('accounts', {
     .notNull()
     .unique()
     .references(() => users.id, { onDelete: 'cascade' }),
-  balance: integer('balance').notNull().default(0),
+  balance: bigint('balance', { mode: 'number' }).notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
@@ -114,7 +122,9 @@ export const tasks = pgTable(
       .$type<string[]>()
       .default(sql`'[]'::jsonb`)
       .notNull(),
-    imageNumber: integer('image_number').notNull().default(4), // Changed default from 1 to 4
+    imageNumber: integer('image_number').notNull().default(4),
+    priceUnit: priceUnitEnum('price_unit').notNull().default('per_image'), // 新增：记录该任务的计费方式
+    tokenCount: integer('token_count'), // 新增：如果按 token 计费，记录使用的 token 数量
     errorDetails: jsonb('error_details')
       .$type<{
         summary?: string // Overall error summary
@@ -135,7 +145,8 @@ export const tasks = pgTable(
 export const prices = pgTable('prices', {
   id: serial('id').primaryKey(),
   taskType: taskTypeEnum('task_type').notNull().unique(),
-  price: integer('price').notNull(),
+  price: bigint('price', { mode: 'number' }).notNull(),
+  priceUnit: priceUnitEnum('price_unit').notNull().default('per_image'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
@@ -148,13 +159,11 @@ export const transactions = pgTable(
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id),
-    taskId: integer('task_id')
-      .notNull()
-      .references(() => tasks.id),
-    amount: integer('amount').notNull(),
+    taskId: integer('task_id').references(() => tasks.id),
+    amount: bigint('amount', { mode: 'number' }).notNull(),
     type: transactionTypeEnum('type').notNull(),
-    balanceBefore: integer('balance_before').notNull(),
-    balanceAfter: integer('balance_after').notNull(),
+    balanceBefore: bigint('balance_before', { mode: 'number' }).notNull(),
+    balanceAfter: bigint('balance_after', { mode: 'number' }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
