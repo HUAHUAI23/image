@@ -44,6 +44,8 @@ export interface GenerateImagesOptions {
   size?: string
   /** Timeout per image in seconds */
   timeout?: number
+  /** Maximum concurrent requests (default: SEEDREAM_CONCURRENCY env var, fallback: 20) */
+  concurrency?: number
 }
 
 export interface GeneratedImage {
@@ -233,6 +235,49 @@ async function generateSingleImage(
 }
 
 // ============================================================================
+// Concurrency Control Helper
+// ============================================================================
+
+/**
+ * Execute async tasks with concurrency limit
+ * Uses a queue-based approach with no external dependencies
+ *
+ * @param tasks - Array of async task functions
+ * @param concurrency - Maximum concurrent tasks
+ * @returns Array of results in same order as tasks
+ */
+async function parallelLimit<T>(
+  tasks: Array<() => Promise<T>>,
+  concurrency: number
+): Promise<T[]> {
+  const results: T[] = new Array(tasks.length)
+  let index = 0
+
+  // Worker function that processes tasks from the queue
+  const worker = async (): Promise<void> => {
+    while (index < tasks.length) {
+      const currentIndex = index++
+      const task = tasks[currentIndex]
+      try {
+        results[currentIndex] = await task()
+      } catch (error) {
+        // Task should handle its own errors, but catch here as safety
+        logger.error(error, `Task ${currentIndex} failed`)
+        results[currentIndex] = error as T
+      }
+    }
+  }
+
+  // Create worker pool with specified concurrency
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker())
+
+  // Wait for all workers to complete
+  await Promise.all(workers)
+
+  return results
+}
+
+// ============================================================================
 // Parallel Image Generation
 // ============================================================================
 
@@ -245,9 +290,11 @@ async function generateSingleImage(
 export async function generateImagesDetailed(
   options: GenerateImagesOptions
 ): Promise<GenerateImagesResult> {
-  const { imageCount = env.SEEDREAM_BATCH_SIZE } = options
+  const { imageCount = env.SEEDREAM_BATCH_SIZE, concurrency = env.SEEDREAM_CONCURRENCY } = options
 
-  logger.info(`Starting parallel generation of ${imageCount} images`)
+  logger.info(
+    `Starting parallel generation of ${imageCount} images (concurrency: ${concurrency})`
+  )
 
   // Render final prompt
   const prompt = await renderPrompt(options)
@@ -262,22 +309,12 @@ export async function generateImagesDetailed(
     }
   }
 
-  // Generate images in parallel (with concurrency limit)
-  const concurrency = Math.min(imageCount, 4) // Max 4 parallel requests
-  const results: GeneratedImage[] = []
+  // Generate all images with concurrency control
+  const tasks = Array.from({ length: imageCount }, (_, index) => () =>
+    generateSingleImage(prompt, options, index)
+  )
 
-  // Split into batches
-  const batches: number[][] = []
-  for (let i = 0; i < imageCount; i += concurrency) {
-    batches.push(Array.from({ length: Math.min(concurrency, imageCount - i) }, (_, j) => i + j))
-  }
-
-  // Process batches sequentially, items within batch in parallel
-  for (const batch of batches) {
-    const batchPromises = batch.map((index) => generateSingleImage(prompt, options, index))
-    const batchResults = await Promise.all(batchPromises)
-    results.push(...batchResults)
-  }
+  const results = await parallelLimit(tasks, concurrency)
 
   // Separate successes and failures
   const successfulResults = results.filter((r) => r.success)

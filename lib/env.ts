@@ -28,6 +28,7 @@ export const env = createEnv({
     SEEDREAM_BASE_URL: z.url(),
     SEEDREAM_MODEL: z.string().min(1),
     SEEDREAM_BATCH_SIZE: z.coerce.number(),
+    SEEDREAM_CONCURRENCY: z.coerce.number().default(20),
   },
   /*
    * Environment variables available on the client (and server).
@@ -66,6 +67,7 @@ export const env = createEnv({
     SEEDREAM_BASE_URL: process.env.SEEDREAM_BASE_URL,
     SEEDREAM_MODEL: process.env.SEEDREAM_MODEL,
     SEEDREAM_BATCH_SIZE: process.env.SEEDREAM_BATCH_SIZE,
+    SEEDREAM_CONCURRENCY: process.env.SEEDREAM_CONCURRENCY,
   },
   /*
    * Skip validation during build time (e.g., in CI/CD)
