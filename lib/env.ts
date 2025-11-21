@@ -8,8 +8,26 @@ export const env = createEnv({
    */
   server: {
     DATABASE_URL: z.url(),
-    AUTH_SECRET: z.string().min(1).default('default-secret-key-change-me'),
+    AUTH_SECRET: z.string().min(1),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+
+    // Volcengine TOS (Object Storage)
+    VOLCENGINE_ACCESS_KEY: z.string().min(1),
+    VOLCENGINE_SECRET_KEY: z.string().min(1),
+    VOLCENGINE_REGION: z.string().min(1),
+    VOLCENGINE_ENDPOINT: z.string().min(1),
+    VOLCENGINE_BUCKET_NAME: z.string().min(1),
+
+    // Doubao VLM (ARK SDK)
+    ARK_API_KEY: z.string().min(1),
+    ARK_BASE_URL: z.url(),
+    ARK_MODEL: z.string().min(1),
+
+    // Seedream (Image Generation)
+    SEEDREAM_API_KEY: z.string().min(1),
+    SEEDREAM_BASE_URL: z.url(),
+    SEEDREAM_MODEL: z.string().min(1),
+    SEEDREAM_BATCH_SIZE: z.coerce.number(),
   },
   /*
    * Environment variables available on the client (and server).
@@ -30,6 +48,24 @@ export const env = createEnv({
     AUTH_SECRET: process.env.AUTH_SECRET,
     NODE_ENV: process.env.NODE_ENV,
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+
+    // Volcengine TOS
+    VOLCENGINE_ACCESS_KEY: process.env.VOLCENGINE_ACCESS_KEY,
+    VOLCENGINE_SECRET_KEY: process.env.VOLCENGINE_SECRET_KEY,
+    VOLCENGINE_REGION: process.env.VOLCENGINE_REGION,
+    VOLCENGINE_ENDPOINT: process.env.VOLCENGINE_ENDPOINT,
+    VOLCENGINE_BUCKET_NAME: process.env.VOLCENGINE_BUCKET_NAME,
+
+    // Doubao VLM
+    ARK_API_KEY: process.env.ARK_API_KEY,
+    ARK_BASE_URL: process.env.ARK_BASE_URL,
+    ARK_MODEL: process.env.ARK_MODEL,
+
+    // Seedream
+    SEEDREAM_API_KEY: process.env.SEEDREAM_API_KEY,
+    SEEDREAM_BASE_URL: process.env.SEEDREAM_BASE_URL,
+    SEEDREAM_MODEL: process.env.SEEDREAM_MODEL,
+    SEEDREAM_BATCH_SIZE: process.env.SEEDREAM_BATCH_SIZE,
   },
   /*
    * Skip validation during build time (e.g., in CI/CD)

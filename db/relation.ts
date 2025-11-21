@@ -1,6 +1,6 @@
 // db/relations.ts
 import { relations } from 'drizzle-orm'
-import { users, userIdentities, accounts, tasks, transactions } from './schema'
+import { users, userIdentities, accounts, tasks, transactions, promptTemplates } from './schema'
 
 // ==================== Relations 定义 ====================
 
@@ -37,7 +37,16 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     fields: [tasks.accountId],
     references: [accounts.id],
   }),
+  template: one(promptTemplates, {
+    fields: [tasks.templatePromptId],
+    references: [promptTemplates.id],
+  }),
   transactions: many(transactions),
+}))
+
+// 提示词模板关系
+export const promptTemplatesRelations = relations(promptTemplates, ({ many }) => ({
+  tasks: many(tasks),
 }))
 
 // 交易关系

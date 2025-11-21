@@ -18,7 +18,7 @@ import { sql } from 'drizzle-orm'
 
 export const authProviderEnum = pgEnum('auth_provider', ['password', 'google', 'github'])
 export const taskTypeEnum = pgEnum('task_type', ['text_to_image', 'image_to_image'])
-export const taskStatusEnum = pgEnum('task_status', ['pending', 'processing', 'success', 'failed'])
+export const taskStatusEnum = pgEnum('task_status', ['pending', 'processing', 'success', 'partial_success', 'failed'])
 export const transactionTypeEnum = pgEnum('transaction_type', ['charge', 'refund'])
 
 // ==================== 用户相关表 ====================
@@ -103,13 +103,24 @@ export const tasks = pgTable(
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id),
+    name: varchar('name', { length: 255 }).notNull().default(''), // Task name
     type: taskTypeEnum('type').notNull(),
     status: taskStatusEnum('status').notNull().default('pending'),
     vlmPrompt: text('vlm_prompt'),
-    templatePrompt: text('template_prompt'),
+    templatePromptId: integer('template_prompt_id').references(() => promptTemplates.id),
     userPrompt: text('user_prompt'),
     originalImageUrl: text('original_image_url'),
-    generatedImageUrl: text('generated_image_url'),
+    generatedImageUrls: jsonb('generated_image_urls')
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`)
+      .notNull(),
+    imageNumber: integer('image_number').notNull().default(4), // Changed default from 1 to 4
+    errorDetails: jsonb('error_details')
+      .$type<{
+        summary?: string // Overall error summary
+        imageErrors?: Array<{ index: number; url?: string; error: string }> // Per-image errors
+      }>()
+      .default(sql`'{}'::jsonb`), // Detailed error information for failed/partial tasks
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()

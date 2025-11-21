@@ -1,13 +1,65 @@
+'use client'
+
 import { getTasksAction } from '@/app/actions/task'
-import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
+import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { CreateTaskButton } from '@/components/create-task-button'
 import Image from 'next/image'
-import { ImageIcon, Clock, AlertCircle, CheckCircle2, Sparkles } from 'lucide-react'
+import { ImageIcon, Clock, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { useEffect, useState } from 'react'
+import { useModal } from '@/components/providers/modal-provider'
+import { ImageGalleryModal } from '@/components/modals/image-gallery-modal'
 
-export default async function TaskListPage() {
-  const tasks = await getTasksAction()
+type Task = {
+  id: number
+  name: string
+  type: string
+  status: string
+  userPrompt: string | null
+  originalImageUrl: string | null
+  generatedImageUrls: string[]
+  createdAt: Date
+}
+
+export default function TaskListPage() {
+  const [tasks, setTasks] = useState<Task[]>([])
+  const { setOnTaskSuccess } = useModal()
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false)
+
+  // Fetch tasks
+  const fetchTasks = async () => {
+    const result = await getTasksAction()
+    setTasks(result)
+  }
+
+  // Handle opening gallery
+  const handleOpenGallery = (task: Task) => {
+    if (task.generatedImageUrls && task.generatedImageUrls.length > 0) {
+      setSelectedTask(task)
+      setIsGalleryOpen(true)
+    }
+  }
+
+  // Initial load
+  useEffect(() => {
+    fetchTasks()
+  }, [])
+
+  // Polling every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchTasks()
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Setup refresh on task success
+  useEffect(() => {
+    setOnTaskSuccess(() => fetchTasks)
+    return () => setOnTaskSuccess(undefined)
+  }, [setOnTaskSuccess])
 
   if (tasks.length === 0) {
     return (
@@ -94,72 +146,118 @@ export default async function TaskListPage() {
           </div>
 
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {tasks.map((task) => (
-              <Card key={task.id} className="group overflow-hidden transition-all hover:shadow-md">
-                <div className="aspect-square relative bg-muted overflow-hidden">
-                  {task.generatedImageUrl ? (
-                      <Image
-                          src={task.generatedImageUrl}
-                          alt="Generated"
+            {tasks.map((task) => {
+              const hasImages = task.generatedImageUrls && task.generatedImageUrls.length > 0
+              const firstImage = hasImages ? task.generatedImageUrls[0] : null
+              const imageCount = task.generatedImageUrls?.length || 0
+
+              return (
+                <Card key={task.id} className="group overflow-hidden transition-all hover:shadow-md">
+                  <div
+                    className="aspect-square relative bg-muted overflow-hidden cursor-pointer"
+                    onClick={() => handleOpenGallery(task)}
+                  >
+                    {hasImages ? (
+                      <>
+                        <Image
+                          src={firstImage!}
+                          alt={`Generated`}
                           fill
                           className="object-cover transition-transform duration-300 group-hover:scale-105"
-                      />
-                  ) : task.originalImageUrl ? (
-                      <>
+                        />
+                        {imageCount > 1 && (
+                          <div className="absolute bottom-2 left-2 z-10">
+                            <Badge variant="secondary" className="backdrop-blur-md">
+                              {imageCount} 张
+                            </Badge>
+                          </div>
+                        )}
+                      </>
+                    ) : task.originalImageUrl ? (
+                        <>
                           <Image
-                              src={task.originalImageUrl}
-                              alt="Original"
-                              fill
-                              className="object-cover opacity-50 blur-sm"
+                            src={task.originalImageUrl}
+                            alt="Original"
+                            fill
+                            className="object-cover opacity-50 blur-sm"
                           />
                           <div className="absolute inset-0 flex items-center justify-center">
-                              <Badge variant="secondary" className="backdrop-blur-md">
-                                  {task.status === 'pending' && '等待处理'}
-                                  {task.status === 'processing' && '生成中...'}
-                              </Badge>
+                            <Badge variant="secondary" className="backdrop-blur-md">
+                              {task.status === 'pending' && '等待处理'}
+                              {task.status === 'processing' && '生成中...'}
+                            </Badge>
                           </div>
-                      </>
-                  ) : (
-                      <div className="flex h-full items-center justify-center">
+                        </>
+                      ) : (
+                        <div className="flex h-full items-center justify-center">
                           <ImageIcon className="h-12 w-12 text-muted-foreground/20" />
-                      </div>
-                  )}
+                        </div>
+                      )}
 
-                  <div className="absolute top-2 right-2">
-                      <Badge variant={
-                          task.status === 'success' ? 'default' :
-                          task.status === 'failed' ? 'destructive' : 'secondary'
-                      } className="shadow-sm">
-                          {task.status === 'success' && <CheckCircle2 className="mr-1 h-3 w-3" />}
+                      <div className="absolute top-2 right-2">
+                        <Badge
+                          variant={
+                            task.status === 'success' || task.status === 'partial_success'
+                              ? 'default'
+                              : task.status === 'failed'
+                              ? 'destructive'
+                              : 'secondary'
+                          }
+                          className="shadow-sm"
+                        >
+                          {(task.status === 'success' || task.status === 'partial_success') && (
+                            <CheckCircle2 className="mr-1 h-3 w-3" />
+                          )}
                           {task.status === 'failed' && <AlertCircle className="mr-1 h-3 w-3" />}
                           {task.status === 'pending' && <Clock className="mr-1 h-3 w-3 animate-pulse" />}
                           {task.status === 'processing' && <Clock className="mr-1 h-3 w-3 animate-spin" />}
-                          <span className="capitalize">{task.status}</span>
-                      </Badge>
-                  </div>
-                </div>
+                          <span className="capitalize">
+                            {task.status === 'partial_success' ? '部分成功' : task.status}
+                          </span>
+                        </Badge>
+                      </div>
 
-                <CardContent className="p-4">
-                  <div className="space-y-1">
+                    {/* Hover overlay to view all images */}
+                    {hasImages && (
+                      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 flex items-center justify-center">
+                        <div className="text-white text-sm font-medium">
+                          {imageCount > 1 ? `查看全部 ${imageCount} 张` : '查看图片'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <CardContent className="p-4">
+                    <div className="space-y-1">
                       <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                              {task.type === 'text_to_image' ? '文生图' : '图生图'}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                              #{task.id}
-                          </span>
+                        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                          {task.type === 'text_to_image' ? '文生图' : '图生图'}
+                        </span>
+                        <span className="text-xs text-muted-foreground">#{task.id}</span>
                       </div>
                       <p className="text-sm font-medium line-clamp-2 min-h-10" title={task.userPrompt || '无提示词'}>
-                          {task.userPrompt || '无提示词'}
+                        {task.userPrompt || '无提示词'}
                       </p>
-                  </div>
-                </CardContent>
-                <CardFooter className="p-4 pt-0 text-xs text-muted-foreground">
-                  {new Date(task.createdAt).toLocaleString()}
-                </CardFooter>
-              </Card>
-            ))}
+                    </div>
+                  </CardContent>
+                  <CardFooter className="p-4 pt-0 text-xs text-muted-foreground">
+                    {new Date(task.createdAt).toLocaleString()}
+                  </CardFooter>
+                </Card>
+              )
+            })}
           </div>
+
+          {/* Image Gallery Modal */}
+          {selectedTask && (
+            <ImageGalleryModal
+              open={isGalleryOpen}
+              onOpenChange={setIsGalleryOpen}
+              images={selectedTask.generatedImageUrls}
+              taskName={selectedTask.name}
+              taskId={selectedTask.id}
+            />
+          )}
       </div>
     </div>
   )
