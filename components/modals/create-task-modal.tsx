@@ -263,20 +263,20 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 />
               </div>
 
-              {/* Settings Grid */}
-              <div className="grid grid-cols-2 gap-6">
+              {/* Settings Section */}
+              <div className="grid grid-cols-2 gap-6 pt-2">
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">风格模板</Label>
+                  <Label className="text-sm font-medium text-foreground/80">风格模板</Label>
                   <Select
                     name="templateId"
                     value={selectedTemplate}
                     onValueChange={setSelectedTemplate}
                   >
-                    <SelectTrigger className="h-11 shadow-sm w-full">
-                      <SelectValue placeholder="选择模板..." />
+                    <SelectTrigger className="!h-11 w-full shadow-sm">
+                      <SelectValue placeholder="选择风格模板..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">无模板</SelectItem>
+                      <SelectItem value="none">不使用模板 (默认)</SelectItem>
                       {templates.map((t) => (
                         <SelectItem key={t.id} value={t.id.toString()}>
                           {t.name}
@@ -287,17 +287,17 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">生成数量</Label>
+                  <Label className="text-sm font-medium text-foreground/80">生成数量</Label>
                   <div className="relative">
                     <Input
                       name="imageNumber"
                       type="number"
                       min={1}
-                      max={200}
+                      max={500}
                       value={imageNumber}
                       onChange={(e) => {
                         const value = parseInt(e.target.value) || 4;
-                        const clampedValue = Math.max(1, Math.min(200, value));
+                        const clampedValue = Math.max(1, Math.min(500, value));
                         setImageNumber(clampedValue);
                       }}
                       onBlur={(e) => {
@@ -305,28 +305,30 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                         if (value < 1) {
                           setImageNumber(1);
                           toast.error('图片数量不能小于1');
-                        } else if (value > 200) {
-                          setImageNumber(200);
-                          toast.error('图片数量不能超过200');
+                        } else if (value > 500) {
+                          setImageNumber(500);
+                          toast.error('图片数量不能超过500');
                         }
                       }}
-                      placeholder="1-200"
-                      className="h-11 shadow-sm pr-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      placeholder="1-500"
+                      className="h-11 w-full shadow-sm pr-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-                      / 200
-                    </span>
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none select-none">
+                      <span className="text-sm text-muted-foreground">张</span>
+                      <span className="text-xs text-muted-foreground/40">/ 500</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Price Estimation */}
-              <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span>预计消耗:</span>
+              <div className="flex items-center justify-between px-4 py-3 bg-primary/5 rounded-lg border border-primary/10">
+                <div className="flex items-center gap-2 text-sm text-primary/80 font-medium">
+                  <Sparkles className="w-4 h-4" />
+                  <span>预计消耗点数</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-semibold text-primary">
+                  <span className="text-xl font-bold text-primary">
                     {formatCurrency(estimatedCost)}
                   </span>
                   <span className="text-xs text-muted-foreground">
@@ -445,7 +447,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                         <>
                           <p className="text-sm font-medium text-foreground">点击或拖拽上传</p>
                           <p className="text-xs text-muted-foreground/60">
-                            支持 JPG, PNG (最大 10MB)
+                            支持 JPG, PNG (最大 500MB)
                           </p>
                         </>
                       )}

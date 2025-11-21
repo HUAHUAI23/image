@@ -27,73 +27,73 @@ export default function LoginPage() {
       <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-primary/20 opacity-20 blur-[100px]"></div>
       <div className="absolute right-0 bottom-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-blue-500/20 opacity-20 blur-[100px]"></div>
 
-      <div className="w-full max-w-sm space-y-6 relative z-10">
-        <div className="flex flex-col items-center justify-center gap-2 self-center">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg">
+      <div className="w-full max-w-[400px] space-y-6 relative z-10">
+        <div className="flex flex-col items-center justify-center gap-3 self-center mb-4">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg">
             <GalleryVerticalEnd className="size-6" />
           </div>
-          <span className="text-2xl font-bold tracking-tight">Image Gen Pro</span>
-          <p className="text-sm text-muted-foreground">Enterprise Grade AI Generation</p>
+          <span className="text-xl font-bold tracking-tight text-foreground">AI 创意工坊</span>
         </div>
 
-        <Card className="shadow-2xl border-border/40 bg-background/60 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
-          <CardHeader className="space-y-1 text-center pb-2">
-            <CardTitle className="text-xl font-bold">Welcome Back</CardTitle>
-            <CardDescription>
-              Sign in to your account to continue
+        <Card className="shadow-xl border bg-card">
+          <CardHeader className="space-y-1 text-center pb-6 pt-8">
+            <CardTitle className="text-xl font-bold tracking-tight">欢迎回来</CardTitle>
+            <CardDescription className="text-sm text-muted-foreground">
+              登录账户开启您的创作之旅
             </CardDescription>
           </CardHeader>
           <form action={action}>
-            <CardContent className="grid gap-4">
+            <CardContent className="grid gap-5 px-8">
               <div className="grid gap-2">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="username" className="text-sm font-medium">用户名</Label>
                 <Input
                   id="username"
                   name="username"
                   type="text"
-                  placeholder="Enter your username"
+                  placeholder="请输入用户名"
                   required
                   minLength={3}
-                  className="bg-background/50"
+                  className="h-10 bg-muted/30"
                 />
                 {state?.errors?.username && (
-                  <p className="text-xs text-destructive font-medium">{state.errors.username[0]}</p>
+                  <p className="text-xs text-destructive font-medium mt-1">{state.errors.username[0]}</p>
                 )}
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
+                  <Label htmlFor="password" className="text-sm font-medium">密码</Label>
                 </div>
                 <Input
                   id="password"
                   name="password"
                   type="password"
+                  placeholder="••••••••"
                   required
                   minLength={6}
-                  className="bg-background/50"
+                  className="h-10 bg-muted/30"
                 />
                 {state?.errors?.password && (
-                  <p className="text-xs text-destructive font-medium">{state.errors.password[0]}</p>
+                  <p className="text-xs text-destructive font-medium mt-1">{state.errors.password[0]}</p>
                 )}
               </div>
             </CardContent>
-            <CardFooter className="flex flex-col gap-4 pt-2">
-              <Button className="w-full font-semibold shadow-md" type="submit" disabled={isPending} size="lg">
+            <CardFooter className="flex flex-col gap-5 px-8 pb-8 pt-4">
+              <Button className="w-full font-medium shadow-sm h-10 text-sm" type="submit" disabled={isPending}>
                 {isPending ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Signing in...
+                    登录中...
                   </>
                 ) : (
                   <>
-                    Sign In
+                    登录
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </>
                 )}
               </Button>
-              <p className="text-xs text-center text-muted-foreground">
-                By clicking continue, you agree to our <span className="underline cursor-pointer hover:text-foreground">Terms of Service</span> and <span className="underline cursor-pointer hover:text-foreground">Privacy Policy</span>.
-              </p>
+              <div className="text-xs text-center text-muted-foreground/70 leading-relaxed max-w-[280px] mx-auto">
+                登录即代表您同意我们的 <span className="hover:text-foreground hover:underline cursor-pointer transition-colors">服务条款</span> 和 <span className="hover:text-foreground hover:underline cursor-pointer transition-colors">隐私政策</span>
+              </div>
             </CardFooter>
           </form>
         </Card>

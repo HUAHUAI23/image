@@ -18,7 +18,7 @@ const createTaskSchema = z.object({
   name: z.string().min(1, '任务名称不能为空').max(255, '任务名称过长'),
   userPrompt: z.string().optional(),
   templatePromptId: z.number().nullable().optional(),
-  imageNumber: z.number().min(1, '图片数量至少为1').max(200, '图片数量不能超过200').default(4),
+  imageNumber: z.number().min(1, '图片数量至少为1').max(500, '图片数量不能超过500').default(4),
   existingImageUrl: z.string().nullable().optional(),
 })
 
