@@ -1,7 +1,8 @@
 'use client';
 
-import { useActionState } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Controller, FieldErrors, Resolver, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Image as ImageIcon,
   Loader2,
@@ -13,7 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { createTaskAction, getPricesAction } from '@/app/actions/task';
+import { getPricesAction } from '@/app/actions/task';
 import { getPromptTemplatesAction } from '@/app/actions/template';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -32,11 +33,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { formatCurrency } from '@/lib/const';
 import { cn } from '@/lib/utils';
-
-// Constants
-const DEFAULT_TASK_TYPE = 'image_to_image';
-const DEFAULT_IMAGE_NUMBER = 4;
-const DEFAULT_TEMPLATE = 'none';
+import {
+  createTaskFormSchema,
+  CreateTaskFormValues,
+  DEFAULT_IMAGE_NUMBER,
+  DEFAULT_TASK_TYPE,
+  DEFAULT_TEMPLATE_ID,
+} from '@/lib/validations/task';
 
 type Template = {
   id: number;
@@ -52,28 +55,53 @@ interface CreateTaskModalProps {
 }
 
 export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskModalProps) {
-  const [state, action, isPending] = useActionState(createTaskAction, null);
-  const [type, setType] = useState<string>(DEFAULT_TASK_TYPE);
-  const [taskName, setTaskName] = useState('');
-  const [userPrompt, setUserPrompt] = useState('');
-  const [imageNumber, setImageNumber] = useState(DEFAULT_IMAGE_NUMBER);
+  const {
+    control,
+    handleSubmit,
+    register,
+    reset,
+    setValue,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<CreateTaskFormValues>({
+    resolver: zodResolver(createTaskFormSchema) as Resolver<CreateTaskFormValues>,
+    defaultValues: {
+      type: DEFAULT_TASK_TYPE,
+      name: '',
+      userPrompt: '',
+      templateId: DEFAULT_TEMPLATE_ID,
+      imageNumber: DEFAULT_IMAGE_NUMBER,
+      existingImageUrl: '',
+      hasLocalImage: false,
+    },
+  });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>(DEFAULT_TEMPLATE);
   const [prices, setPrices] = useState<any[]>([]);
   const isMobile = useIsMobile();
   const TitleComponent = isMobile ? DrawerTitle : DialogTitle;
   const isModalActiveRef = useRef(open);
   const analysisRunIdRef = useRef(0);
-  const normalizedType = type || DEFAULT_TASK_TYPE;
+  const normalizedType = watch('type') || DEFAULT_TASK_TYPE;
+  const taskName = watch('name');
+  const imageNumber = watch('imageNumber');
   const isImageTask = normalizedType === 'image_to_image';
   const isTextTask = normalizedType === 'text_to_image';
-  const handleTypeChange = useCallback((nextType: string) => {
-    setType(nextType || DEFAULT_TASK_TYPE);
-  }, []);
+  const handleTypeChange = useCallback(
+    (nextType: string) => {
+      const safeType: CreateTaskFormValues['type'] =
+        nextType === 'text_to_image'
+          ? 'text_to_image'
+          : nextType === 'image_to_image'
+            ? 'image_to_image'
+            : DEFAULT_TASK_TYPE;
+      setValue('type', safeType, { shouldValidate: true, shouldDirty: true });
+    },
+    [setValue]
+  );
 
   const cleanupPreview = useCallback(() => {
     setPreviewUrl((prev) => {
@@ -86,19 +114,23 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
 
   // Unified form reset function
   const resetForm = useCallback(() => {
-    setType(DEFAULT_TASK_TYPE);
-    setTaskName('');
-    setUserPrompt('');
-    setImageNumber(DEFAULT_IMAGE_NUMBER);
-    setSelectedTemplate(DEFAULT_TEMPLATE);
+    reset({
+      type: DEFAULT_TASK_TYPE,
+      name: '',
+      userPrompt: '',
+      templateId: DEFAULT_TEMPLATE_ID,
+      imageNumber: DEFAULT_IMAGE_NUMBER,
+      existingImageUrl: '',
+      hasLocalImage: false,
+    });
     cleanupPreview();
-    setUploadedImageUrl(null);
+    setSelectedFile(null);
     setIsAnalyzing(false);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  }, [cleanupPreview]);
+  }, [cleanupPreview, reset]);
 
   // Analyze image with VLM (defined early for use in other callbacks)
   const analyzeImage = useCallback(
@@ -132,14 +164,19 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
           return;
         }
 
-        setUploadedImageUrl(result.imageUrl);
-        setUserPrompt(result.analysis);
+        setValue('existingImageUrl', result.imageUrl, { shouldValidate: true });
+        setValue('userPrompt', result.analysis || '', {
+          shouldDirty: true,
+          shouldValidate: isTextTask,
+        });
         toast.success('图片分析完成！');
       } catch (error) {
         console.error('VLM analysis failed:', error);
         if (runId === analysisRunIdRef.current && isModalActiveRef.current) {
           toast.error('图片分析失败：' + (error instanceof Error ? error.message : '未知错误'));
-          setUserPrompt('图片分析失败，请手动输入描述...');
+          setValue('userPrompt', '图片分析失败，请手动输入描述...', {
+            shouldDirty: true,
+          });
         }
       } finally {
         if (runId === analysisRunIdRef.current) {
@@ -147,13 +184,16 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         }
       }
     },
-    [taskName]
+    [isTextTask, setValue, taskName]
   );
 
   // Handle file upload and trigger VLM analysis
   const processImageFile = useCallback(
     async (file: File) => {
       cleanupPreview();
+      setSelectedFile(file);
+      setValue('existingImageUrl', '', { shouldValidate: true });
+      setValue('hasLocalImage', true, { shouldValidate: true });
       const url = URL.createObjectURL(file);
       setPreviewUrl(url);
 
@@ -161,7 +201,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         await analyzeImage(file);
       }
     },
-    [cleanupPreview, analyzeImage, isImageTask]
+    [analyzeImage, cleanupPreview, isImageTask, setValue]
   );
 
   // Handle file upload and trigger VLM analysis
@@ -208,14 +248,16 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     (e: React.MouseEvent) => {
       e.stopPropagation();
       cleanupPreview();
-      setUploadedImageUrl(null);
-      setUserPrompt('');
+      setSelectedFile(null);
+      setValue('existingImageUrl', '', { shouldValidate: true });
+      setValue('hasLocalImage', false, { shouldValidate: true });
+      setValue('userPrompt', '', { shouldDirty: true });
 
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     },
-    [cleanupPreview]
+    [cleanupPreview, setValue]
   );
 
   // Load templates and prices when modal opens
@@ -236,18 +278,6 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     return perImagePrice * imageNumber;
   }, [perImagePrice, imageNumber]);
 
-  // Handle action result (submit success)
-  useEffect(() => {
-    if (state && 'success' in state && state.success) {
-      toast.success('任务创建成功');
-      resetForm();
-      onOpenChange(false);
-      onSuccess?.();
-    } else if (state?.message) {
-      toast.error(state.message);
-    }
-  }, [state, onOpenChange, onSuccess, resetForm]);
-
   // Reset form when modal closes and prevent stale async updates
   useEffect(() => {
     isModalActiveRef.current = open;
@@ -257,39 +287,67 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     }
   }, [open, resetForm]);
 
-  // Form validation and submit handler
-  const handleSubmit = useCallback(
-    (e: React.FormEvent<HTMLFormElement>) => {
-      // Validate form data
-      if (!taskName.trim()) {
-        e.preventDefault();
-        toast.error('请输入任务名称');
-        return;
-      }
+  const onSubmit = useCallback(
+    async (values: CreateTaskFormValues) => {
+      try {
+        const payload = new FormData();
+        payload.append('type', values.type);
+        payload.append('name', values.name);
+        if (values.userPrompt) {
+          payload.append('userPrompt', values.userPrompt);
+        }
+        if (values.templateId && values.templateId !== DEFAULT_TEMPLATE_ID) {
+          payload.append('templateId', values.templateId);
+        }
+        payload.append('imageNumber', values.imageNumber.toString());
+        if (values.existingImageUrl) {
+          payload.append('existingImageUrl', values.existingImageUrl);
+        }
+        if (selectedFile) {
+          payload.append('image', selectedFile);
+        }
 
-      if (!normalizedType) {
-        e.preventDefault();
-        toast.error('请选择任务类型');
-        return;
-      }
+        const response = await fetch('/api/tasks', {
+          method: 'POST',
+          body: payload,
+        });
 
-      if (isTextTask && !userPrompt.trim()) {
-        e.preventDefault();
-        toast.error('请输入提示词');
-        return;
-      }
+        const result = await response.json();
 
-      if (isImageTask && !uploadedImageUrl) {
-        e.preventDefault();
-        toast.error('图生图模式必须上传参考图片');
-        return;
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || '创建任务失败');
+        }
+
+        toast.success('任务创建成功');
+        resetForm();
+        onOpenChange(false);
+        onSuccess?.();
+      } catch (error) {
+        console.error('Create task failed:', error);
+        toast.error(error instanceof Error ? error.message : '创建任务失败');
       }
     },
-    [taskName, normalizedType, isTextTask, isImageTask, userPrompt, uploadedImageUrl]
+    [onOpenChange, onSuccess, resetForm, selectedFile]
   );
 
+  const onInvalid = useCallback((formErrors: FieldErrors<CreateTaskFormValues>) => {
+    let message: string | null = null;
+    for (const error of Object.values(formErrors)) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'message' in error &&
+        typeof error.message === 'string'
+      ) {
+        message = error.message;
+        break;
+      }
+    }
+    toast.error(message || '表单校验失败');
+  }, []);
+
   const modalBody = (
-    <form onSubmit={handleSubmit} action={action} className="flex flex-col h-full">
+    <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="flex flex-col h-full">
       {/* Header Area */}
       <div
         className={cn(
@@ -349,12 +407,11 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
               <span className="text-xs text-destructive">*</span>
             </Label>
             <Input
-              name="name"
-              value={taskName}
-              onChange={(e) => setTaskName(e.target.value)}
+              {...register('name')}
               placeholder="例如: 产品宣传图-金融风格"
               className="h-11 text-base shadow-sm transition-shadow focus:shadow-md"
             />
+            {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
 
           {/* User Prompt */}
@@ -372,9 +429,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
               )}
             </div>
             <Textarea
-              name="userPrompt"
-              value={userPrompt}
-              onChange={(e) => setUserPrompt(e.target.value)}
+              {...register('userPrompt')}
               placeholder={
                 isImageTask
                   ? '上传图片后自动分析，也可手动编辑...'
@@ -386,63 +441,77 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
               )}
               disabled={isAnalyzing}
             />
+            {errors.userPrompt && (
+              <p className="text-xs text-destructive">{errors.userPrompt.message}</p>
+            )}
           </div>
 
           {/* Settings Section */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
             <div className="space-y-2">
               <Label className="text-sm font-medium text-foreground/80">风格模板</Label>
-              <Select
+              <Controller
                 name="templateId"
-                value={selectedTemplate}
-                onValueChange={setSelectedTemplate}
-              >
-                <SelectTrigger className="h-11! w-full shadow-sm">
-                  <SelectValue placeholder="选择风格模板..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">不使用模板 (默认)</SelectItem>
-                  {templates.map((t) => (
-                    <SelectItem key={t.id} value={t.id.toString()}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="h-11! w-full shadow-sm">
+                      <SelectValue placeholder="选择风格模板..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={DEFAULT_TEMPLATE_ID}>不使用模板 (默认)</SelectItem>
+                      {templates.map((t) => (
+                        <SelectItem key={t.id} value={t.id.toString()}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.templateId && (
+                <p className="text-xs text-destructive">{errors.templateId.message}</p>
+              )}
             </div>
 
             <div className="space-y-2">
               <Label className="text-sm font-medium text-foreground/80">生成数量</Label>
               <div className="relative">
                 <Input
-                  name="imageNumber"
                   type="number"
                   min={1}
-                  max={500}
+                  max={20}
                   value={imageNumber}
                   onChange={(e) => {
-                    const value = parseInt(e.target.value) || 4;
-                    const clampedValue = Math.max(1, Math.min(500, value));
-                    setImageNumber(clampedValue);
+                    const value = parseInt(e.target.value, 10);
+                    const normalized = Number.isNaN(value) ? DEFAULT_IMAGE_NUMBER : value;
+                    const clampedValue = Math.max(1, Math.min(20, normalized));
+                    setValue('imageNumber', clampedValue, {
+                      shouldValidate: true,
+                      shouldDirty: true,
+                    });
                   }}
                   onBlur={(e) => {
-                    const value = parseInt(e.target.value) || 4;
-                    if (value < 1) {
-                      setImageNumber(1);
+                    const value = parseInt(e.target.value, 10);
+                    if (Number.isNaN(value) || value < 1) {
+                      setValue('imageNumber', 1, { shouldValidate: true });
                       toast.error('图片数量不能小于1');
-                    } else if (value > 500) {
-                      setImageNumber(500);
-                      toast.error('图片数量不能超过500');
+                    } else if (value > 20) {
+                      setValue('imageNumber', 20, { shouldValidate: true });
+                      toast.error('图片数量不能超过20');
                     }
                   }}
-                  placeholder="1-500"
+                  placeholder="1-20"
                   className="h-11 w-full shadow-sm pr-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none select-none">
                   <span className="text-sm text-muted-foreground">张</span>
-                  <span className="text-xs text-muted-foreground/40">/ 500</span>
+                  <span className="text-xs text-muted-foreground/40">/ 20</span>
                 </div>
               </div>
+              {errors.imageNumber && (
+                <p className="text-xs text-destructive">{errors.imageNumber.message}</p>
+              )}
             </div>
           </div>
 
@@ -466,12 +535,6 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
               </span>
             </div>
           </div>
-
-          {/* Hidden inputs */}
-          <input type="hidden" name="type" value={normalizedType} />
-          {uploadedImageUrl && (
-            <input type="hidden" name="existingImageUrl" value={uploadedImageUrl} />
-          )}
         </div>
 
         {/* Right Sidebar: Reference Image */}
@@ -582,6 +645,9 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
           </div>
 
           {/* Helper Text */}
+          {errors.existingImageUrl && (
+            <p className="text-xs text-destructive px-1">{errors.existingImageUrl.message}</p>
+          )}
           <div className="text-[10px] text-muted-foreground/50 px-1">
             {isImageTask
               ? '上传的图片将作为生成新图片的基础参考。系统会自动分析图片内容。'
@@ -607,13 +673,13 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         </Button>
         <Button
           type="submit"
-          disabled={isPending || isAnalyzing}
+          disabled={isSubmitting || isAnalyzing}
           className={cn(
             'h-10 px-8 min-w-[140px] shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30',
             isMobile && 'w-full justify-center'
           )}
         >
-          {isPending ? (
+          {isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               生成中...
