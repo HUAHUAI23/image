@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Image as ImageIcon,
   Loader2,
@@ -33,6 +33,12 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { formatCurrency } from '@/lib/const';
 import { cn } from '@/lib/utils';
 
+// Constants
+const MODAL_CLOSE_ANIMATION_DURATION = 300; // ms
+const DEFAULT_TASK_TYPE = 'image_to_image';
+const DEFAULT_IMAGE_NUMBER = 4;
+const DEFAULT_TEMPLATE = 'none';
+
 type Template = {
   id: number;
   name: string;
@@ -48,20 +54,154 @@ interface CreateTaskModalProps {
 
 export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskModalProps) {
   const [state, action, isPending] = useActionState(createTaskAction, null);
-  const [type, setType] = useState('image_to_image');
+  const [type, setType] = useState(DEFAULT_TASK_TYPE);
   const [taskName, setTaskName] = useState('');
   const [userPrompt, setUserPrompt] = useState('');
-  const [imageNumber, setImageNumber] = useState(4);
+  const [imageNumber, setImageNumber] = useState(DEFAULT_IMAGE_NUMBER);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('none');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>(DEFAULT_TEMPLATE);
   const [prices, setPrices] = useState<any[]>([]);
   const [estimatedCost, setEstimatedCost] = useState(0);
   const isMobile = useIsMobile();
   const TitleComponent = isMobile ? DrawerTitle : DialogTitle;
+
+  // Unified form reset function
+  const resetForm = useCallback(() => {
+    setType(DEFAULT_TASK_TYPE);
+    setTaskName('');
+    setUserPrompt('');
+    setImageNumber(DEFAULT_IMAGE_NUMBER);
+    setSelectedTemplate(DEFAULT_TEMPLATE);
+
+    // Clean up preview URL to prevent memory leaks
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+
+    setUploadedImageUrl(null);
+
+    // Clear file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [previewUrl]);
+
+  // Analyze image with VLM (defined early for use in other callbacks)
+  const analyzeImage = useCallback(
+    async (file: File) => {
+      if (!taskName || taskName.trim().length === 0) {
+        toast.error('请先输入任务名称');
+        return;
+      }
+
+      setIsAnalyzing(true);
+      try {
+        // Upload to TOS and analyze with VLM
+        const formData = new FormData();
+        formData.append('image', file);
+        formData.append('taskName', taskName);
+
+        toast.info('正在上传图片并分析...');
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          setUploadedImageUrl(result.imageUrl);
+          setUserPrompt(result.analysis);
+          toast.success('图片分析完成！');
+        } else {
+          throw new Error(result.error || 'Upload failed');
+        }
+      } catch (error) {
+        console.error('VLM analysis failed:', error);
+        toast.error('图片分析失败：' + (error instanceof Error ? error.message : '未知错误'));
+        setUserPrompt('图片分析失败，请手动输入描述...');
+      } finally {
+        setIsAnalyzing(false);
+      }
+    },
+    [taskName]
+  );
+
+  // Handle file upload and trigger VLM analysis
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const selectedFile = e.target.files?.[0];
+      if (!selectedFile) return;
+
+      // Clean up old preview URL to prevent memory leaks
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+
+      // Create new preview URL
+      const url = URL.createObjectURL(selectedFile);
+      setPreviewUrl(url);
+
+      // Upload to TOS and analyze with VLM
+      if (type === 'image_to_image') {
+        await analyzeImage(selectedFile);
+      }
+    },
+    [previewUrl, type, analyzeImage]
+  );
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      const droppedFile = e.dataTransfer.files[0];
+      if (droppedFile && droppedFile.type.startsWith('image/')) {
+        // Clean up old preview URL
+        if (previewUrl) {
+          URL.revokeObjectURL(previewUrl);
+        }
+
+        const url = URL.createObjectURL(droppedFile);
+        setPreviewUrl(url);
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(droppedFile);
+        if (fileInputRef.current) {
+          fileInputRef.current.files = dataTransfer.files;
+        }
+
+        // Analyze with VLM
+        if (type === 'image_to_image') {
+          await analyzeImage(droppedFile);
+        }
+      }
+    },
+    [previewUrl, type, analyzeImage]
+  );
+
+  const clearFile = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+
+      // Clean up preview URL
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+
+      setPreviewUrl(null);
+      setUploadedImageUrl(null);
+      setUserPrompt('');
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    },
+    [previewUrl]
+  );
 
   // Load templates and prices when modal opens
   useEffect(() => {
@@ -81,107 +221,27 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     }
   }, [prices, type, imageNumber]);
 
-  // Handle action result
+  // Handle action result (submit success)
   useEffect(() => {
     if (state && 'success' in state && state.success) {
       toast.success('任务创建成功');
+      resetForm();
       onOpenChange(false);
-      // Reset form state
-      setType('image_to_image');
-      setTaskName('');
-      setUserPrompt('');
-      setImageNumber(4);
-      setPreviewUrl(null);
-      setUploadedImageUrl(null);
-      setSelectedTemplate('none');
-      // Trigger refresh
       onSuccess?.();
     } else if (state?.message) {
       toast.error(state.message);
     }
-  }, [state, onOpenChange, onSuccess]);
+  }, [state, onOpenChange, onSuccess, resetForm]);
 
-  // Handle file upload and trigger VLM analysis
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (!selectedFile) return;
-
-    // Create preview URL
-    const url = URL.createObjectURL(selectedFile);
-    setPreviewUrl(url);
-
-    // Upload to TOS and analyze with VLM
-    if (type === 'image_to_image') {
-      await analyzeImage(selectedFile);
+  // Reset form when modal closes (user cancels or closes manually)
+  useEffect(() => {
+    if (!open) {
+      // Wait for close animation to complete before resetting
+      // This prevents visual flicker during the fade-out animation
+      const timer = setTimeout(resetForm, MODAL_CLOSE_ANIMATION_DURATION);
+      return () => clearTimeout(timer);
     }
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.type.startsWith('image/')) {
-      const url = URL.createObjectURL(droppedFile);
-      setPreviewUrl(url);
-      const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(droppedFile);
-      if (fileInputRef.current) {
-        fileInputRef.current.files = dataTransfer.files;
-      }
-
-      // Analyze with VLM
-      if (type === 'image_to_image') {
-        await analyzeImage(droppedFile);
-      }
-    }
-  };
-
-  const analyzeImage = async (file: File) => {
-    if (!taskName || taskName.trim().length === 0) {
-      toast.error('请先输入任务名称');
-      return;
-    }
-
-    setIsAnalyzing(true);
-    try {
-      // Upload to TOS and analyze with VLM
-      const formData = new FormData();
-      formData.append('image', file);
-      formData.append('taskName', taskName);
-
-      toast.info('正在上传图片并分析...');
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        setUploadedImageUrl(result.imageUrl);
-        setUserPrompt(result.analysis);
-        toast.success('图片分析完成！');
-      } else {
-        throw new Error(result.error || 'Upload failed');
-      }
-    } catch (error) {
-      console.error('VLM analysis failed:', error);
-      toast.error('图片分析失败：' + (error instanceof Error ? error.message : '未知错误'));
-      setUserPrompt('图片分析失败，请手动输入描述...');
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const clearFile = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setPreviewUrl(null);
-    setUploadedImageUrl(null);
-    setUserPrompt('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
+  }, [open, resetForm]);
 
   const modalBody = (
     <form action={action} className="flex flex-col h-full">
@@ -369,7 +429,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
           </div>
 
           {/* Hidden inputs */}
-          <input type="hidden" name="type" value={type} />
+          <input type="hidden" name="type" value={type || DEFAULT_TASK_TYPE} />
           {uploadedImageUrl && (
             <input type="hidden" name="existingImageUrl" value={uploadedImageUrl} />
           )}

@@ -33,6 +33,43 @@ import { Slider } from '@/components/ui/slider';
 import { buildProcessQuery, ImageProcessConfig } from '@/lib/image-process';
 import { cn } from '@/lib/utils';
 
+// 缩放模式配置
+const RESIZE_MODES = [
+  { value: 'none', label: '默认 (不处理)', description: '保持原图不进行任何处理' },
+  {
+    value: 'lfit',
+    label: '等比缩放 (lfit)',
+    description: '等比缩放，完全落入指定框内的最大图片',
+  },
+  {
+    value: 'mfit',
+    label: '延伸缩放 (mfit)',
+    description: '等比缩放，完全覆盖指定框的最小图片',
+  },
+  {
+    value: 'fill',
+    label: '居中裁剪 (fill)',
+    description: '等比缩放后居中裁剪，填满指定框',
+  },
+  {
+    value: 'pad',
+    label: '填充模式 (pad)',
+    description: '等比缩放后用背景色填充空白区域',
+  },
+  {
+    value: 'fixed',
+    label: '强制缩放 (fixed)',
+    description: '强制按指定宽高缩放，不保持原图比例',
+  },
+] as const;
+
+// 输出格式配置
+const OUTPUT_FORMATS = [
+  { value: 'none', label: '原图', description: '保持原始格式' },
+  { value: 'webp', label: 'WebP', description: '现代格式，体积更小' },
+  { value: 'jpg', label: 'JPG', description: '兼容性最好' },
+] as const;
+
 interface DownloadConfigSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -221,13 +258,31 @@ export function DownloadConfigSheet({
                       <SelectValue placeholder="选择缩放模式" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">默认 (不处理)</SelectItem>
-                      <SelectItem value="lfit">等比缩放 (lfit) - 限制在框内</SelectItem>
-                      <SelectItem value="mfit">延伸缩放 (mfit) - 填满并延伸</SelectItem>
-                      <SelectItem value="fill">居中裁剪 (fill) - 填满并裁剪</SelectItem>
-                      <SelectItem value="pad">填充模式 (pad) - 填满加背景</SelectItem>
+                      {RESIZE_MODES.map((mode) => (
+                        <SelectItem key={mode.value} value={mode.value}>
+                          <div className="flex flex-col py-1">
+                            <span>{mode.label}</span>
+                            <span className="text-[10px] text-muted-foreground leading-relaxed">
+                              {mode.description}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
+                  {config.mode === 'fixed' && (
+                    <div className="flex items-start gap-2 p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg animate-in fade-in slide-in-from-top-2">
+                      <span className="text-amber-600 dark:text-amber-400 mt-0.5">⚠️</span>
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-amber-900 dark:text-amber-100">
+                          固定模式提示
+                        </p>
+                        <p className="text-[10px] text-amber-700 dark:text-amber-200 leading-relaxed">
+                          此模式会强制按照指定的宽高进行缩放，可能会改变图片的原始宽高比，导致图片变形。
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {config.mode === 'pad' && (
@@ -287,27 +342,27 @@ export function DownloadConfigSheet({
                   <div className="space-y-3">
                     <Label className="text-xs text-muted-foreground">输出格式</Label>
                     <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { value: 'none', label: '原图' },
-                        { value: 'webp', label: 'WebP' },
-                        { value: 'jpg', label: 'JPG' },
-                      ].map((fmt) => (
+                      {OUTPUT_FORMATS.map((fmt) => (
                         <div
                           key={fmt.value}
                           className={cn(
-                            'flex items-center justify-center h-9 rounded-md border cursor-pointer text-sm transition-all duration-200',
-                            config.compress === (fmt.value === 'none' ? undefined : fmt.value) ||
+                            'flex flex-col items-center justify-center h-16 rounded-md border cursor-pointer text-sm transition-all duration-200 p-2',
+                            config.compress === (fmt.value === 'none' ? 'none' : fmt.value) ||
                               (fmt.value === 'none' && !config.compress)
                               ? 'bg-primary text-primary-foreground border-primary font-medium shadow-md scale-[1.02]'
                               : 'bg-background hover:bg-muted border-input hover:border-primary/30'
                           )}
                           onClick={() =>
                             updateConfig({
-                              compress: fmt.value === 'none' ? undefined : (fmt.value as any),
+                              compress: fmt.value === 'none' ? 'none' : (fmt.value as any),
                             })
                           }
+                          title={fmt.description}
                         >
-                          {fmt.label}
+                          <span className="font-medium">{fmt.label}</span>
+                          <span className="text-[10px] opacity-70 text-center">
+                            {fmt.description}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -316,7 +371,13 @@ export function DownloadConfigSheet({
                   {config.compress && config.compress !== 'none' && (
                     <div className="bg-muted/30 rounded-xl p-4 space-y-4 animate-in slide-in-from-top-2 fade-in">
                       <div className="flex items-center justify-between">
-                        <Label className="text-xs font-medium">压缩质量 (Q)</Label>
+                        <Label className="text-xs font-medium">
+                          压缩质量 (Q)
+                          <span className="ml-2 text-[10px] text-muted-foreground font-normal">
+                            {config.compress === 'webp' && '(WebP)'}
+                            {config.compress === 'jpg' && '(JPG)'}
+                          </span>
+                        </Label>
                         <span className="text-xs font-mono bg-background border px-1.5 py-0.5 rounded text-foreground">
                           {config.quality ?? 85}
                         </span>
@@ -330,6 +391,13 @@ export function DownloadConfigSheet({
                         onValueChange={(vals) => updateConfig({ quality: vals[0] })}
                         className="py-1"
                       />
+                      <p className="text-[10px] text-muted-foreground">
+                        {config.quality && config.quality < 70
+                          ? '⚠️ 低质量可能导致明显失真'
+                          : config.quality && config.quality > 95
+                            ? '💡 高质量会增加文件体积'
+                            : '✨ 推荐质量范围 70-95'}
+                      </p>
                     </div>
                   )}
                 </div>

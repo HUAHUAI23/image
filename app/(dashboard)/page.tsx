@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, ImageIcon } from 'lucide-react';
 import Image from 'next/image';
 
@@ -11,6 +11,15 @@ import { useModal } from '@/components/providers/modal-provider';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { SidebarTrigger } from '@/components/ui/sidebar';
+
+// Constants
+const POLLING_INTERVAL = 5000; // 5 seconds
+const IMAGE_SIZES = {
+  MOBILE: '100vw',
+  TABLET: '50vw',
+  DESKTOP_MD: '33vw',
+  DESKTOP_LG: '25vw',
+} as const;
 
 type Task = {
   id: number;
@@ -29,21 +38,15 @@ export default function TaskListPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
 
-  // Fetch tasks
-  const fetchTasks = async () => {
-    const result = await getTasksAction();
-    setTasks(result);
-  };
-
   // Handle opening gallery
-  const handleOpenGallery = (task: Task) => {
+  const handleOpenGallery = useCallback((task: Task) => {
     if (task.generatedImageUrls && task.generatedImageUrls.length > 0) {
       setSelectedTask(task);
       setIsGalleryOpen(true);
     }
-  };
+  }, []);
 
-  const getTextToImageOverlayCopy = (status: Task['status']) => {
+  const getTextToImageOverlayCopy = useCallback((status: Task['status']) => {
     switch (status) {
       case 'pending':
         return {
@@ -63,24 +66,39 @@ export default function TaskListPage() {
       default:
         return null;
     }
-  };
+  }, []);
 
-  // Initial load
+  // Initial load and polling setup
   useEffect(() => {
+    let isMounted = true;
+
+    const fetchTasks = async () => {
+      const result = await getTasksAction();
+      if (isMounted) {
+        setTasks(result);
+      }
+    };
+
+    // Initial load
     fetchTasks();
+
+    // Setup polling for task status updates
+    const interval = setInterval(fetchTasks, POLLING_INTERVAL);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
-  // Polling every 5 seconds
+  // Setup refresh callback on task success
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchTasks();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    const refreshTasks = async () => {
+      const result = await getTasksAction();
+      setTasks(result);
+    };
 
-  // Setup refresh on task success
-  useEffect(() => {
-    setOnTaskSuccess(() => fetchTasks);
+    setOnTaskSuccess(() => refreshTasks);
     return () => setOnTaskSuccess(undefined);
   }, [setOnTaskSuccess]);
 
@@ -188,6 +206,8 @@ export default function TaskListPage() {
                         alt={`Generated`}
                         fill
                         className="object-cover transition-transform duration-300 group-hover:scale-105"
+                        sizes={`(max-width: 768px) ${IMAGE_SIZES.MOBILE}, (max-width: 1024px) ${IMAGE_SIZES.TABLET}, (max-width: 1280px) ${IMAGE_SIZES.DESKTOP_MD}, ${IMAGE_SIZES.DESKTOP_LG}`}
+                        priority={task.id === tasks[0]?.id}
                       />
                       {imageCount > 1 && (
                         <div className="absolute bottom-2 left-2 z-10">
@@ -204,6 +224,7 @@ export default function TaskListPage() {
                         alt="Original"
                         fill
                         className="object-cover opacity-50 blur-sm"
+                        sizes={`(max-width: 768px) ${IMAGE_SIZES.MOBILE}, (max-width: 1024px) ${IMAGE_SIZES.TABLET}, (max-width: 1280px) ${IMAGE_SIZES.DESKTOP_MD}, ${IMAGE_SIZES.DESKTOP_LG}`}
                       />
                       <div className="absolute inset-0 flex items-center justify-center">
                         <Badge variant="secondary" className="backdrop-blur-md">

@@ -8,7 +8,11 @@ import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import {
+  GalleryDialog,
+  GalleryDialogContent,
+  GalleryDialogTitle,
+} from '@/components/ui/gallery-dialog';
 import { Separator } from '@/components/ui/separator';
 import { batchDownloadAsZip, DownloadProgress, downloadSingleImage } from '@/lib/batch-download';
 import { DEFAULT_IMAGE_PROCESS_CONFIG, ImageProcessConfig } from '@/lib/image-process';
@@ -39,6 +43,7 @@ export function ImageGalleryModal({
   const [config, setConfig] = useState<ImageProcessConfig>(DEFAULT_IMAGE_PROCESS_CONFIG);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+  const [photoViewVisible, setPhotoViewVisible] = useState(false);
 
   // Reset selection mode when dialog closes
   useEffect(() => {
@@ -48,14 +53,11 @@ export function ImageGalleryModal({
     }
   }, [open]);
 
-  // Check if PhotoView is currently in fullscreen mode
-  const isPhotoViewOpen = () => document.querySelector('.PhotoView-Portal') !== null;
-
-  // Prevent dialog from closing when PhotoView is in fullscreen
-  const preventCloseIfPhotoViewOpen = (e: Event) => {
-    if (isPhotoViewOpen()) {
-      e.preventDefault();
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && photoViewVisible) {
+      return;
     }
+    onOpenChange(nextOpen);
   };
 
   const toggleSelection = (index: number) => {
@@ -129,21 +131,19 @@ export function ImageGalleryModal({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
+      <GalleryDialog open={open} onOpenChange={handleDialogOpenChange} modal={!photoViewVisible}>
+        <GalleryDialogContent
+          showCloseButton={false}
           className="sm:max-w-[1200px] h-[85vh] p-0 gap-0 overflow-hidden flex flex-col bg-background/95 shadow-2xl border-none ring-1 ring-white/10 backdrop-blur-xl"
-          onPointerDownOutside={preventCloseIfPhotoViewOpen}
-          onInteractOutside={preventCloseIfPhotoViewOpen}
-          onEscapeKeyDown={preventCloseIfPhotoViewOpen}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0 bg-background/60 backdrop-blur-md z-10">
-            <DialogTitle className="text-lg font-semibold flex items-center gap-3">
+            <GalleryDialogTitle className="text-lg font-semibold flex items-center gap-3">
               <span className="truncate max-w-[300px] md:max-w-[500px]">{taskName}</span>
               <Badge variant="outline" className="font-normal text-muted-foreground">
                 {images.length} 张图片
               </Badge>
-            </DialogTitle>
+            </GalleryDialogTitle>
 
             <div className="flex items-center gap-3">
               {images.length > 0 && (
@@ -208,6 +208,7 @@ export function ImageGalleryModal({
             ) : (
               <PhotoProvider
                 maskOpacity={0.9}
+                onVisibleChange={(visible) => setPhotoViewVisible(visible)}
                 speed={() => 400}
                 easing={(type) =>
                   type === 2
@@ -280,7 +281,7 @@ export function ImageGalleryModal({
                         ) : (
                           // Default mode: PhotoView trigger
                           <PhotoView src={imageUrl}>
-                            <div className="w-full h-full cursor-zoom-in">
+                            <div className="w-full h-full cursor-zoom-in relative">
                               <Image
                                 src={imageUrl}
                                 alt={`${taskName} - 图片 ${index + 1}`}
@@ -370,8 +371,8 @@ export function ImageGalleryModal({
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </GalleryDialogContent>
+      </GalleryDialog>
 
       {/* Download Configuration Sheet */}
       <DownloadConfigSheet

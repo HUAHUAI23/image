@@ -26,7 +26,7 @@ export interface ImageProcessConfig {
   /** 填充颜色，十六进制，如 "FFFFFF" (pad 模式使用) */
   color: string
   /** 压缩格式 */
-  compress: 'none' | 'webp' | 'heic'
+  compress: 'none' | 'webp' | 'jpg' | 'heic'
   /** 图片质量 (1-100) */
   quality: number | null
 }
@@ -72,13 +72,20 @@ export function buildProcessQuery(config: ImageProcessConfig): string {
     parts.push('image/resize,' + resizeParts.join(','))
   }
 
-  // Add compression format (HEIC uses special slim parameter)
-  if (config.compress === 'heic') {
-    parts.push('slim,zlevel_6')
+  // Add format conversion
+  if (config.compress && config.compress !== 'none') {
+    if (config.compress === 'heic') {
+      // HEIC uses special slim parameter
+      parts.push('slim,zlevel_6')
+    } else if (config.compress === 'webp') {
+      parts.push('image/format,webp')
+    } else if (config.compress === 'jpg') {
+      parts.push('image/format,jpg')
+    }
   }
 
-  // Add quality parameter (only for WebP)
-  if (config.quality && config.compress === 'webp') {
+  // Add quality parameter (for WebP and JPG)
+  if (config.quality && (config.compress === 'webp' || config.compress === 'jpg')) {
     parts.push(`image/quality,q_${config.quality}`)
   }
 
@@ -111,8 +118,12 @@ export function applyProcessToUrl(url: string, config: ImageProcessConfig): stri
  * @param defaultExt - Default extension if no compression
  * @returns File extension (without dot)
  */
-export function getFileExtension(compress: ImageProcessConfig['compress'], defaultExt = 'png'): string {
+export function getFileExtension(
+  compress: ImageProcessConfig['compress'],
+  defaultExt = 'png'
+): string {
   if (compress === 'webp') return 'webp'
+  if (compress === 'jpg') return 'jpg'
   if (compress === 'heic') return 'heic'
   return defaultExt
 }
