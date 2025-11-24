@@ -1,7 +1,7 @@
 'use client';
 
-import { useActionState } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { startTransition, useActionState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image as ImageIcon,
   Loader2,
@@ -64,10 +64,21 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>(DEFAULT_TEMPLATE);
   const [prices, setPrices] = useState<any[]>([]);
-  const [estimatedCost, setEstimatedCost] = useState(0);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const isMobile = useIsMobile();
   const TitleComponent = isMobile ? DrawerTitle : DialogTitle;
+  const isModalActiveRef = useRef(open);
+  const analysisRunIdRef = useRef(0);
+  const isImageTask = type === 'image_to_image';
+  const isTextTask = type === 'text_to_image';
+
+  const cleanupPreview = useCallback(() => {
+    setPreviewUrl((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev);
+      }
+      return null;
+    });
+  }, []);
 
   // Unified form reset function
   const resetForm = useCallback(() => {
@@ -76,20 +87,14 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     setUserPrompt('');
     setImageNumber(DEFAULT_IMAGE_NUMBER);
     setSelectedTemplate(DEFAULT_TEMPLATE);
-
-    // Clean up preview URL to prevent memory leaks
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
-      setPreviewUrl(null);
-    }
-
+    cleanupPreview();
     setUploadedImageUrl(null);
+    setIsAnalyzing(false);
 
-    // Clear file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  }, [previewUrl]);
+  }, [cleanupPreview]);
 
   // Analyze image with VLM (defined early for use in other callbacks)
   const analyzeImage = useCallback(
@@ -99,9 +104,9 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         return;
       }
 
+      const runId = ++analysisRunIdRef.current;
       setIsAnalyzing(true);
       try {
-        // Upload to TOS and analyze with VLM
         const formData = new FormData();
         formData.append('image', file);
         formData.append('taskName', taskName);
@@ -115,22 +120,44 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
 
         const result = await response.json();
 
-        if (result.success) {
-          setUploadedImageUrl(result.imageUrl);
-          setUserPrompt(result.analysis);
-          toast.success('图片分析完成！');
-        } else {
+        if (!result.success) {
           throw new Error(result.error || 'Upload failed');
         }
+
+        if (!isModalActiveRef.current || runId !== analysisRunIdRef.current) {
+          return;
+        }
+
+        setUploadedImageUrl(result.imageUrl);
+        setUserPrompt(result.analysis);
+        toast.success('图片分析完成！');
       } catch (error) {
         console.error('VLM analysis failed:', error);
-        toast.error('图片分析失败：' + (error instanceof Error ? error.message : '未知错误'));
-        setUserPrompt('图片分析失败，请手动输入描述...');
+        if (runId === analysisRunIdRef.current && isModalActiveRef.current) {
+          toast.error('图片分析失败：' + (error instanceof Error ? error.message : '未知错误'));
+          setUserPrompt('图片分析失败，请手动输入描述...');
+        }
       } finally {
-        setIsAnalyzing(false);
+        if (runId === analysisRunIdRef.current) {
+          setIsAnalyzing(false);
+        }
       }
     },
     [taskName]
+  );
+
+  // Handle file upload and trigger VLM analysis
+  const processImageFile = useCallback(
+    async (file: File) => {
+      cleanupPreview();
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+
+      if (isImageTask) {
+        await analyzeImage(file);
+      }
+    },
+    [cleanupPreview, analyzeImage, isImageTask]
   );
 
   // Handle file upload and trigger VLM analysis
@@ -139,60 +166,44 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
       const selectedFile = e.target.files?.[0];
       if (!selectedFile) return;
 
-      // Clean up old preview URL to prevent memory leaks
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
+      if (!taskName.trim()) {
+        toast.error('请先输入任务名称');
+        return;
       }
 
-      // Create new preview URL
-      const url = URL.createObjectURL(selectedFile);
-      setPreviewUrl(url);
-
-      // Upload to TOS and analyze with VLM
-      if (type === 'image_to_image') {
-        await analyzeImage(selectedFile);
-      }
+      await processImageFile(selectedFile);
     },
-    [previewUrl, type, analyzeImage]
+    [processImageFile, taskName]
   );
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
       const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile && droppedFile.type.startsWith('image/')) {
-        // Clean up old preview URL
-        if (previewUrl) {
-          URL.revokeObjectURL(previewUrl);
-        }
+      if (!droppedFile || !droppedFile.type.startsWith('image/')) {
+        return;
+      }
 
-        const url = URL.createObjectURL(droppedFile);
-        setPreviewUrl(url);
-        const dataTransfer = new DataTransfer();
-        dataTransfer.items.add(droppedFile);
-        if (fileInputRef.current) {
-          fileInputRef.current.files = dataTransfer.files;
-        }
+      if (!taskName.trim()) {
+        toast.error('请先输入任务名称');
+        return;
+      }
 
-        // Analyze with VLM
-        if (type === 'image_to_image') {
-          await analyzeImage(droppedFile);
-        }
+      await processImageFile(droppedFile);
+
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(droppedFile);
+      if (fileInputRef.current) {
+        fileInputRef.current.files = dataTransfer.files;
       }
     },
-    [previewUrl, type, analyzeImage]
+    [processImageFile, taskName]
   );
 
   const clearFile = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-
-      // Clean up preview URL
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-      }
-
-      setPreviewUrl(null);
+      cleanupPreview();
       setUploadedImageUrl(null);
       setUserPrompt('');
 
@@ -200,7 +211,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         fileInputRef.current.value = '';
       }
     },
-    [previewUrl]
+    [cleanupPreview]
   );
 
   // Load templates and prices when modal opens
@@ -211,40 +222,38 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     }
   }, [open]);
 
-  // Calculate estimated cost
-  useEffect(() => {
-    const priceRecord = prices.find((p) => p.taskType === type && p.priceUnit === 'per_image');
-    if (priceRecord) {
-      setEstimatedCost(priceRecord.price * imageNumber);
-    } else {
-      setEstimatedCost(0);
-    }
-  }, [prices, type, imageNumber]);
+  const perImagePrice = useMemo(() => {
+    return prices.find((p) => p.taskType === type && p.priceUnit === 'per_image')?.price || 0;
+  }, [prices, type]);
+
+  const estimatedCost = useMemo(() => {
+    return perImagePrice * imageNumber;
+  }, [perImagePrice, imageNumber]);
 
   // Handle action result (submit success)
   useEffect(() => {
     if (state && 'success' in state && state.success) {
       toast.success('任务创建成功');
-      setIsSubmitting(false);
       resetForm();
       onOpenChange(false);
       onSuccess?.();
     } else if (state?.message) {
       toast.error(state.message);
-      setIsSubmitting(false);
     }
   }, [state, onOpenChange, onSuccess, resetForm]);
 
-  // Reset form when modal opens (fresh start for each creation)
+  // Reset form when modal closes and prevent stale async updates
   useEffect(() => {
-    if (open) {
+    isModalActiveRef.current = open;
+    if (!open) {
+      analysisRunIdRef.current += 1;
       resetForm();
     }
   }, [open, resetForm]);
 
   // Form validation and submit handler
   const handleSubmit = useCallback(
-    async (e: React.FormEvent<HTMLFormElement>) => {
+    (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
 
       // Validate form data
@@ -258,22 +267,29 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         return;
       }
 
-      if (type === 'text_to_image' && !userPrompt.trim()) {
+      if (isTextTask && !userPrompt.trim()) {
         toast.error('请输入提示词');
         return;
       }
 
-      if (type === 'image_to_image' && !uploadedImageUrl) {
+      if (isImageTask && !uploadedImageUrl) {
         toast.error('图生图模式必须上传参考图片');
         return;
       }
 
       // All validation passed, submit the form
-      setIsSubmitting(true);
       const formData = new FormData(e.currentTarget);
-      action(formData);
+
+      try {
+        startTransition(() => {
+          action(formData);
+        });
+      } catch (error) {
+        console.error('Create task submission failed:', error);
+        toast.error('任务创建失败，请稍后重试');
+      }
     },
-    [taskName, type, userPrompt, uploadedImageUrl, action]
+    [taskName, type, isTextTask, isImageTask, userPrompt, uploadedImageUrl, action]
   );
 
   const modalBody = (
@@ -350,8 +366,8 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
             <div className="flex items-center justify-between">
               <Label className="text-sm font-medium flex items-center gap-2">
                 <Sparkles className="w-4 h-4 text-primary" />
-                {type === 'image_to_image' ? '图片描述 (可修改)' : '提示词'}
-                {type === 'text_to_image' && <span className="text-xs text-destructive">*</span>}
+                {isImageTask ? '图片描述 (可修改)' : '提示词'}
+                {isTextTask && <span className="text-xs text-destructive">*</span>}
               </Label>
               {isAnalyzing && (
                 <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
@@ -364,7 +380,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
               value={userPrompt}
               onChange={(e) => setUserPrompt(e.target.value)}
               placeholder={
-                type === 'image_to_image'
+                isImageTask
                   ? '上传图片后自动分析，也可手动编辑...'
                   : '请输入生成图片的描述，越详细越好...'
               }
@@ -450,11 +466,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 {formatCurrency(estimatedCost)}
               </span>
               <span className="text-xs text-muted-foreground">
-                (
-                {formatCurrency(
-                  prices.find((p) => p.taskType === type && p.priceUnit === 'per_image')?.price || 0
-                )}{' '}
-                / 张)
+                ({formatCurrency(perImagePrice)} / 张)
               </span>
             </div>
           </div>
@@ -475,9 +487,9 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         >
           <div className="flex items-center justify-between">
             <Label className="text-sm font-medium text-foreground/80">
-              {type === 'image_to_image' ? '参考图片' : '参考图片 (可选)'}
+              {isImageTask ? '参考图片' : '参考图片 (可选)'}
             </Label>
-            {type === 'image_to_image' && (
+            {isImageTask && (
               <span className="text-[10px] px-2 py-0.5 bg-primary/10 text-primary rounded-full font-medium">
                 必填
               </span>
@@ -491,7 +503,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
               previewUrl
                 ? 'border-primary/20 bg-background'
                 : 'border-muted-foreground/20 hover:border-primary/50 hover:bg-muted/20',
-              type === 'image_to_image' && !previewUrl && 'border-destructive/20 bg-destructive/5',
+              isImageTask && !previewUrl && 'border-destructive/20 bg-destructive/5',
               !taskName.trim() ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
             )}
             onDragOver={(e) => e.preventDefault()}
@@ -551,9 +563,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 <div
                   className={cn(
                     'w-16 h-16 rounded-2xl flex items-center justify-center transition-colors',
-                    type === 'image_to_image'
-                      ? 'bg-primary/5 text-primary'
-                      : 'bg-muted text-muted-foreground'
+                    isImageTask ? 'bg-primary/5 text-primary' : 'bg-muted text-muted-foreground'
                   )}
                 >
                   <UploadCloud className="h-8 w-8" />
@@ -577,7 +587,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
 
           {/* Helper Text */}
           <div className="text-[10px] text-muted-foreground/50 px-1">
-            {type === 'image_to_image'
+            {isImageTask
               ? '上传的图片将作为生成新图片的基础参考。系统会自动分析图片内容。'
               : '可选择上传图片作为风格或构图参考，留空则纯文本生成。'}
           </div>
@@ -601,13 +611,13 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         </Button>
         <Button
           type="submit"
-          disabled={isPending || isAnalyzing || isSubmitting}
+          disabled={isPending || isAnalyzing}
           className={cn(
             'h-10 px-8 min-w-[140px] shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30',
             isMobile && 'w-full justify-center'
           )}
         >
-          {isPending || isSubmitting ? (
+          {isPending ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               生成中...
