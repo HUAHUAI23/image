@@ -14,13 +14,20 @@ import { ACLType,TosClient } from '@volcengine/tos-sdk'
 import { env } from './env'
 import { convertToJpeg } from './image-utils'
 
-// Initialize TOS Client
-const tosClient = new TosClient({
-  accessKeyId: env.VOLCENGINE_ACCESS_KEY,
-  accessKeySecret: env.VOLCENGINE_SECRET_KEY,
-  region: env.VOLCENGINE_REGION,
-  endpoint: env.VOLCENGINE_ENDPOINT,
-})
+// Lazy initialization of TOS Client (prevents initialization at build time)
+let tosClient: TosClient | null = null
+
+function getTosClient(): TosClient {
+  if (!tosClient) {
+    tosClient = new TosClient({
+      accessKeyId: env.VOLCENGINE_ACCESS_KEY,
+      accessKeySecret: env.VOLCENGINE_SECRET_KEY,
+      region: env.VOLCENGINE_REGION,
+      endpoint: env.VOLCENGINE_ENDPOINT,
+    })
+  }
+  return tosClient
+}
 
 const bucketName = env.VOLCENGINE_BUCKET_NAME
 
@@ -52,7 +59,7 @@ export async function uploadToTOS(
   const objectKey = `${folder}/${userId}/${taskId}/${jpegFilename}`
 
   // Upload to TOS with public-read ACL
-  await tosClient.putObject({
+  await getTosClient().putObject({
     bucket: bucketName,
     key: objectKey,
     body: jpegBuffer,
@@ -110,7 +117,7 @@ export async function deleteFromTOS(url: string): Promise<void> {
   const urlObj = new URL(url)
   const objectKey = urlObj.pathname.substring(1) // Remove leading slash
 
-  await tosClient.deleteObject({
+  await getTosClient().deleteObject({
     bucket: bucketName,
     key: objectKey,
   })
