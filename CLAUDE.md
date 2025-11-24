@@ -297,7 +297,7 @@ Database connection pool in `db/index.ts`:
 
 ### GitHub Actions Workflows
 
-The project includes two automated workflows:
+The project includes three automated workflows:
 
 **1. PR Check (`.github/workflows/pr-check.yml`)**
 - Triggers on pull requests to `main`/`master`/`develop`
@@ -313,6 +313,15 @@ The project includes two automated workflows:
 - Optional: Pushes to Docker Hub (requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`)
 - Uses GitHub Actions cache for faster builds
 - Runs on native architecture runners for optimal performance
+
+**3. Security Scanning (`.github/workflows/security.yml`)**
+- Triggers on pull requests, push to main branches, daily schedule (2 AM UTC), and manual dispatch
+- **Gitleaks Secret Scanning**: Detects exposed API keys, tokens, passwords, and credentials
+- **TruffleHog Secret Detection**: Verifies detected secrets with high confidence detection
+- **Dependency Audit**: Scans npm packages for known vulnerabilities (blocks on high/critical)
+- **PR Comment**: Posts security scan results with actionable recommendations
+- **Configuration**: Uses `.gitleaks.toml` for custom rules and allowlists
+- See **SECURITY.md** for detailed security policy and handling procedures
 
 ### Docker Deployment
 

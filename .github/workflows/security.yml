@@ -1,0 +1,317 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  schedule:
+    # Run security scans daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+env:
+  NODE_VERSION: "22.9.0"
+  PNPM_VERSION: "10.20.0"
+
+jobs:
+  gitleaks:
+    name: Gitleaks Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        id: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        continue-on-error: true
+
+      - name: Upload Gitleaks SARIF report
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+        continue-on-error: true
+
+      - name: Generate Gitleaks summary
+        if: always()
+        run: |
+          echo "## 🔐 Gitleaks Secret Scanning" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.gitleaks.outcome }}" = "success" ]; then
+            echo "✅ **No secrets detected**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Potential secrets detected!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please review the findings and:" >> $GITHUB_STEP_SUMMARY
+            echo "- Remove any exposed secrets immediately" >> $GITHUB_STEP_SUMMARY
+            echo "- Rotate compromised credentials" >> $GITHUB_STEP_SUMMARY
+            echo "- Use environment variables or secret management tools" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if secrets found
+        if: steps.gitleaks.outcome == 'failure'
+        run: exit 1
+
+  trufflehog:
+    name: TruffleHog Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog
+        id: trufflehog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+        continue-on-error: true
+
+      - name: Generate TruffleHog summary
+        if: always()
+        run: |
+          echo "## 🔍 TruffleHog Secret Detection" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.trufflehog.outcome }}" = "success" ]; then
+            echo "✅ **No verified secrets detected**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Verified secrets found!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "TruffleHog uses verification to reduce false positives." >> $GITHUB_STEP_SUMMARY
+            echo "These are highly likely to be real credentials!" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if verified secrets found
+        if: steps.trufflehog.outcome == 'failure'
+        run: exit 1
+
+  dependency-audit:
+    name: Dependency Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run pnpm audit
+        id: pnpm-audit
+        run: |
+          pnpm audit --audit-level=moderate --json > audit-results.json || true
+          if [ -s audit-results.json ]; then
+            echo "vulnerabilities=$(jq -r '.metadata.vulnerabilities | to_entries | map("\(.key): \(.value)") | join(", ")' audit-results.json)" >> $GITHUB_OUTPUT
+          else
+            echo "vulnerabilities=none" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      - name: Check for high/critical vulnerabilities
+        id: check-severity
+        run: |
+          if [ -f audit-results.json ]; then
+            HIGH=$(jq -r '.metadata.vulnerabilities.high // 0' audit-results.json)
+            CRITICAL=$(jq -r '.metadata.vulnerabilities.critical // 0' audit-results.json)
+
+            if [ "$HIGH" -gt 0 ] || [ "$CRITICAL" -gt 0 ]; then
+              echo "has_critical=true" >> $GITHUB_OUTPUT
+              exit 1
+            else
+              echo "has_critical=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+        continue-on-error: true
+
+      - name: Generate audit summary
+        if: always()
+        run: |
+          echo "## 📦 Dependency Vulnerability Audit" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f audit-results.json ]; then
+            INFO=$(jq -r '.metadata.vulnerabilities.info // 0' audit-results.json)
+            LOW=$(jq -r '.metadata.vulnerabilities.low // 0' audit-results.json)
+            MODERATE=$(jq -r '.metadata.vulnerabilities.moderate // 0' audit-results.json)
+            HIGH=$(jq -r '.metadata.vulnerabilities.high // 0' audit-results.json)
+            CRITICAL=$(jq -r '.metadata.vulnerabilities.critical // 0' audit-results.json)
+
+            echo "### Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+            echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| 🔴 Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟠 High | $HIGH |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟡 Moderate | $MODERATE |" >> $GITHUB_STEP_SUMMARY
+            echo "| 🟢 Low | $LOW |" >> $GITHUB_STEP_SUMMARY
+            echo "| ℹ️ Info | $INFO |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ "${{ steps.check-severity.outputs.has_critical }}" = "true" ]; then
+              echo "### ⚠️ Action Required" >> $GITHUB_STEP_SUMMARY
+              echo "High or critical vulnerabilities detected!" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "**Recommended actions:**" >> $GITHUB_STEP_SUMMARY
+              echo "- Run \`pnpm audit\` locally to see details" >> $GITHUB_STEP_SUMMARY
+              echo "- Update vulnerable packages: \`pnpm update\`" >> $GITHUB_STEP_SUMMARY
+              echo "- Check for breaking changes before updating" >> $GITHUB_STEP_SUMMARY
+              echo "- Consider using \`pnpm audit --fix\` for automatic fixes" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ **No high or critical vulnerabilities detected**" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "✅ **No vulnerabilities detected**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-results
+          path: audit-results.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Fail on critical vulnerabilities
+        if: steps.check-severity.outputs.has_critical == 'true'
+        run: |
+          echo "❌ High or critical vulnerabilities found. Please update dependencies."
+          exit 1
+
+  security-summary:
+    name: Security Scan Summary
+    runs-on: ubuntu-latest
+    needs: [gitleaks, trufflehog, dependency-audit]
+    if: always()
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const gitleaksResult = '${{ needs.gitleaks.result }}';
+            const trufflehogResult = '${{ needs.trufflehog.result }}';
+            const auditResult = '${{ needs.dependency-audit.result }}';
+
+            const allPassed = gitleaksResult === 'success' &&
+                            trufflehogResult === 'success' &&
+                            auditResult === 'success';
+
+            const emoji = allPassed ? '✅' : '⚠️';
+            const status = allPassed ? 'Passed' : 'Issues Found';
+
+            let body = `## ${emoji} Security Scan Results: ${status}\n\n`;
+            body += `### Security Checks\n\n`;
+            body += `| Check | Status |\n`;
+            body += `|-------|--------|\n`;
+            body += `| 🔐 Gitleaks (Secret Scanning) | ${gitleaksResult === 'success' ? '✅ Passed' : '❌ Failed'} |\n`;
+            body += `| 🔍 TruffleHog (Secret Detection) | ${trufflehogResult === 'success' ? '✅ Passed' : '❌ Failed'} |\n`;
+            body += `| 📦 Dependency Audit | ${auditResult === 'success' ? '✅ Passed' : '⚠️ Vulnerabilities Found'} |\n\n`;
+
+            if (allPassed) {
+              body += `### 🎉 Security checks passed!\n\n`;
+              body += `No security issues detected. Your PR is safe to merge from a security perspective.\n\n`;
+            } else {
+              body += `### ⚠️ Security Issues Detected\n\n`;
+
+              if (gitleaksResult !== 'success') {
+                body += `**🔐 Secret Scanning Issues:**\n`;
+                body += `- Gitleaks detected potential secrets in your code\n`;
+                body += `- Review the scan results and remove any exposed credentials\n`;
+                body += `- Never commit API keys, passwords, or tokens\n\n`;
+              }
+
+              if (trufflehogResult !== 'success') {
+                body += `**🔍 Verified Secrets Found:**\n`;
+                body += `- TruffleHog found verified credentials (high confidence)\n`;
+                body += `- These are likely real, working credentials\n`;
+                body += `- Rotate these credentials immediately\n\n`;
+              }
+
+              if (auditResult !== 'success') {
+                body += `**📦 Dependency Vulnerabilities:**\n`;
+                body += `- High or critical vulnerabilities found in dependencies\n`;
+                body += `- Run \`pnpm audit\` locally to see details\n`;
+                body += `- Update vulnerable packages before merging\n\n`;
+              }
+
+              body += `**Please address these security issues before merging.**\n\n`;
+            }
+
+            body += `---\n`;
+            body += `**Commit:** \`${{ github.event.pull_request.head.sha }}\`\n`;
+            body += `**Triggered by:** @${{ github.actor }}\n`;
+
+            try {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+
+              const botComment = comments.find(comment =>
+                comment.user.type === 'Bot' &&
+                comment.body.includes('Security Scan Results')
+              );
+
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: body
+                });
+              }
+            } catch (error) {
+              console.log('Failed to post comment:', error.message);
+            }
+
+      - name: Generate final summary
+        if: always()
+        run: |
+          echo "## 🛡️ Security Scanning Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Overall Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Gitleaks**: ${{ needs.gitleaks.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **TruffleHog**: ${{ needs.trufflehog.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependency Audit**: ${{ needs.dependency-audit.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.gitleaks.result }}" = "success" ] && \
+             [ "${{ needs.trufflehog.result }}" = "success" ] && \
+             [ "${{ needs.dependency-audit.result }}" = "success" ]; then
+            echo "✅ **All security checks passed!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **Security issues detected. Please review and address them.**" >> $GITHUB_STEP_SUMMARY
+          fi
