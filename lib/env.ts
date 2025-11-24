@@ -29,6 +29,13 @@ export const env = createEnv({
     SEEDREAM_MODEL: z.string().min(1),
     SEEDREAM_CONCURRENCY: z.coerce.number().default(20),
 
+    // Queue Configuration
+    QUEUE_CONCURRENCY: z.coerce.number().min(1).max(100).default(5),
+
+    // Cron Configuration
+    CRON_BATCH_SIZE: z.coerce.number().min(1).max(100).default(10),
+    TASK_TIMEOUT_MINUTES: z.coerce.number().min(1).max(1440).default(30),
+
     GIFT_AMOUNT: z.coerce.number().default(0),
     ANALYSIS_PRICE: z.coerce.number().default(0),
   },
@@ -69,6 +76,14 @@ export const env = createEnv({
     SEEDREAM_BASE_URL: process.env.SEEDREAM_BASE_URL,
     SEEDREAM_MODEL: process.env.SEEDREAM_MODEL,
     SEEDREAM_CONCURRENCY: process.env.SEEDREAM_CONCURRENCY,
+
+    // Queue
+    QUEUE_CONCURRENCY: process.env.QUEUE_CONCURRENCY,
+
+    // Cron
+    CRON_BATCH_SIZE: process.env.CRON_BATCH_SIZE,
+    TASK_TIMEOUT_MINUTES: process.env.TASK_TIMEOUT_MINUTES,
+
     GIFT_AMOUNT: process.env.GIFT_AMOUNT,
     ANALYSIS_PRICE: process.env.ANALYSIS_PRICE,
   },

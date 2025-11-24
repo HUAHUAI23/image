@@ -4,6 +4,7 @@ import fastq from 'fastq'
 
 import { db } from '@/db'
 import { accounts, promptTemplates,tasks, transactions } from '@/db/schema'
+import { env } from '@/lib/env'
 import { generateImagesDetailed } from '@/lib/image-generation'
 import { logger as baseLogger } from '@/lib/logger'
 import { uploadToTOS } from '@/lib/tos'
@@ -470,9 +471,33 @@ async function processTask(task: Task) {
 
 // ==================== Queue Management ====================
 
-export const queue: queueAsPromised<Task> = fastq.promise(processTask, 1)
+/**
+ * Queue concurrency configuration
+ *
+ * Controlled by QUEUE_CONCURRENCY environment variable.
+ * Determines how many tasks can be processed simultaneously.
+ *
+ * Default: 5 concurrent tasks
+ *
+ * Recommended values based on server resources:
+ * - Small server (2 cores, 4GB RAM): 2-3
+ * - Medium server (4 cores, 8GB RAM): 5-10
+ * - Large server (8+ cores, 16GB+ RAM): 10-20
+ *
+ * Important considerations:
+ * 1. Database connection pool size must accommodate concurrent tasks
+ *    Recommended: connection pool >= QUEUE_CONCURRENCY * 3 + 10
+ * 2. Memory usage: each task may use 50-200MB during image processing
+ * 3. API rate limits: total concurrent requests = QUEUE_CONCURRENCY × SEEDREAM_CONCURRENCY
+ * 4. Monitor system resources and adjust accordingly
+ */
+export const queue: queueAsPromised<Task> = fastq.promise(processTask, env.QUEUE_CONCURRENCY)
+
+logger.info(`Queue initialized with concurrency: ${env.QUEUE_CONCURRENCY}`)
 
 export function addToQueue(task: Task) {
   queue.push(task)
-  logger.info(`Enqueued task ${task.id} (queue length: ${queue.length()})`)
+  logger.info(
+    `Enqueued task ${task.id} (queue length: ${queue.length()}, running: ${queue.running()})`
+  )
 }

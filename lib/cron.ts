@@ -2,6 +2,7 @@ import { Cron } from 'croner'
 import { sql } from 'drizzle-orm'
 
 import { db } from '@/db'
+import { env } from '@/lib/env'
 import { logger as baseLogger } from '@/lib/logger'
 
 import { addToQueue } from './queue'
@@ -16,15 +17,29 @@ const logger = baseLogger.child({ module: 'lib/cron' })
 const CRON_INTERVAL = '*/5 * * * * *'
 
 /**
- * Maximum number of pending tasks to process in one cycle
+ * Maximum number of pending tasks to fetch and enqueue in one cycle
+ * Controlled by CRON_BATCH_SIZE environment variable
+ * Default: 10 tasks per cycle
+ *
+ * Higher values reduce database query frequency but may cause larger bursts.
+ * Recommended: 10-50 depending on QUEUE_CONCURRENCY
  */
-const BATCH_SIZE = 10
+const BATCH_SIZE = env.CRON_BATCH_SIZE
 
 /**
- * Task timeout in minutes
- * If a task stays in 'processing' status longer than this, it will be reset to 'pending'
+ * Task timeout threshold in minutes
+ * Controlled by TASK_TIMEOUT_MINUTES environment variable
+ * Default: 30 minutes
+ *
+ * Tasks stuck in 'processing' status longer than this will be reset to 'pending'.
+ * This is a recovery mechanism for crashed workers or hung tasks.
+ *
+ * Considerations:
+ * - Set higher if tasks legitimately take long to complete
+ * - Set lower for faster recovery from failures
+ * - Monitor heartbeat logs to tune this value
  */
-const TASK_TIMEOUT_MINUTES = 30
+const TASK_TIMEOUT_MINUTES = env.TASK_TIMEOUT_MINUTES
 
 // ==================== Task Types ====================
 
@@ -142,9 +157,9 @@ export function initCron() {
   }
 
   logger.info('Initializing cron worker...')
-  logger.info(`  - Interval: every ${CRON_INTERVAL}`)
-  logger.info(`  - Batch size: ${BATCH_SIZE} tasks`)
-  logger.info(`  - Timeout: ${TASK_TIMEOUT_MINUTES} minutes`)
+  logger.info(`  - Interval: ${CRON_INTERVAL}`)
+  logger.info(`  - Batch size: ${BATCH_SIZE} tasks per cycle`)
+  logger.info(`  - Task timeout: ${TASK_TIMEOUT_MINUTES} minutes`)
 
   cronJob = new Cron(CRON_INTERVAL, executeCronJob)
 

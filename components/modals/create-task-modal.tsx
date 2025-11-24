@@ -1,6 +1,6 @@
 'use client';
 
-import { startTransition, useActionState } from 'react';
+import { useActionState } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image as ImageIcon,
@@ -68,8 +68,12 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
   const TitleComponent = isMobile ? DrawerTitle : DialogTitle;
   const isModalActiveRef = useRef(open);
   const analysisRunIdRef = useRef(0);
-  const isImageTask = type === 'image_to_image';
-  const isTextTask = type === 'text_to_image';
+  const normalizedType = type || DEFAULT_TASK_TYPE;
+  const isImageTask = normalizedType === 'image_to_image';
+  const isTextTask = normalizedType === 'text_to_image';
+  const handleTypeChange = useCallback((nextType: string) => {
+    setType(nextType || DEFAULT_TASK_TYPE);
+  }, []);
 
   const cleanupPreview = useCallback(() => {
     setPreviewUrl((prev) => {
@@ -223,8 +227,10 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
   }, [open]);
 
   const perImagePrice = useMemo(() => {
-    return prices.find((p) => p.taskType === type && p.priceUnit === 'per_image')?.price || 0;
-  }, [prices, type]);
+    return (
+      prices.find((p) => p.taskType === normalizedType && p.priceUnit === 'per_image')?.price || 0
+    );
+  }, [prices, normalizedType]);
 
   const estimatedCost = useMemo(() => {
     return perImagePrice * imageNumber;
@@ -254,46 +260,36 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
   // Form validation and submit handler
   const handleSubmit = useCallback(
     (e: React.FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-
       // Validate form data
       if (!taskName.trim()) {
+        e.preventDefault();
         toast.error('请输入任务名称');
         return;
       }
 
-      if (!type) {
+      if (!normalizedType) {
+        e.preventDefault();
         toast.error('请选择任务类型');
         return;
       }
 
       if (isTextTask && !userPrompt.trim()) {
+        e.preventDefault();
         toast.error('请输入提示词');
         return;
       }
 
       if (isImageTask && !uploadedImageUrl) {
+        e.preventDefault();
         toast.error('图生图模式必须上传参考图片');
         return;
       }
-
-      // All validation passed, submit the form
-      const formData = new FormData(e.currentTarget);
-
-      try {
-        startTransition(() => {
-          action(formData);
-        });
-      } catch (error) {
-        console.error('Create task submission failed:', error);
-        toast.error('任务创建失败，请稍后重试');
-      }
     },
-    [taskName, type, isTextTask, isImageTask, userPrompt, uploadedImageUrl, action]
+    [taskName, normalizedType, isTextTask, isImageTask, userPrompt, uploadedImageUrl]
   );
 
   const modalBody = (
-    <form onSubmit={handleSubmit} className="flex flex-col h-full">
+    <form onSubmit={handleSubmit} action={action} className="flex flex-col h-full">
       {/* Header Area */}
       <div
         className={cn(
@@ -311,8 +307,8 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
           )}
         >
           <Tabs
-            value={type}
-            onValueChange={setType}
+            value={normalizedType}
+            onValueChange={handleTypeChange}
             className={cn('w-[280px]', isMobile && 'w-full')}
           >
             <TabsList className="grid w-full grid-cols-2 h-9 bg-muted/50">
@@ -472,7 +468,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
           </div>
 
           {/* Hidden inputs */}
-          <input type="hidden" name="type" value={type} />
+          <input type="hidden" name="type" value={normalizedType} />
           {uploadedImageUrl && (
             <input type="hidden" name="existingImageUrl" value={uploadedImageUrl} />
           )}
