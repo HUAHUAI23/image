@@ -34,7 +34,6 @@ import { formatCurrency } from '@/lib/const';
 import { cn } from '@/lib/utils';
 
 // Constants
-const MODAL_CLOSE_ANIMATION_DURATION = 300; // ms
 const DEFAULT_TASK_TYPE = 'image_to_image';
 const DEFAULT_IMAGE_NUMBER = 4;
 const DEFAULT_TEMPLATE = 'none';
@@ -54,7 +53,7 @@ interface CreateTaskModalProps {
 
 export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskModalProps) {
   const [state, action, isPending] = useActionState(createTaskAction, null);
-  const [type, setType] = useState(DEFAULT_TASK_TYPE);
+  const [type, setType] = useState<string>(DEFAULT_TASK_TYPE);
   const [taskName, setTaskName] = useState('');
   const [userPrompt, setUserPrompt] = useState('');
   const [imageNumber, setImageNumber] = useState(DEFAULT_IMAGE_NUMBER);
@@ -66,6 +65,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
   const [selectedTemplate, setSelectedTemplate] = useState<string>(DEFAULT_TEMPLATE);
   const [prices, setPrices] = useState<any[]>([]);
   const [estimatedCost, setEstimatedCost] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const isMobile = useIsMobile();
   const TitleComponent = isMobile ? DrawerTitle : DialogTitle;
 
@@ -225,26 +225,59 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
   useEffect(() => {
     if (state && 'success' in state && state.success) {
       toast.success('任务创建成功');
+      setIsSubmitting(false);
       resetForm();
       onOpenChange(false);
       onSuccess?.();
     } else if (state?.message) {
       toast.error(state.message);
+      setIsSubmitting(false);
     }
   }, [state, onOpenChange, onSuccess, resetForm]);
 
-  // Reset form when modal closes (user cancels or closes manually)
+  // Reset form when modal opens (fresh start for each creation)
   useEffect(() => {
-    if (!open) {
-      // Wait for close animation to complete before resetting
-      // This prevents visual flicker during the fade-out animation
-      const timer = setTimeout(resetForm, MODAL_CLOSE_ANIMATION_DURATION);
-      return () => clearTimeout(timer);
+    if (open) {
+      resetForm();
     }
   }, [open, resetForm]);
 
+  // Form validation and submit handler
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+
+      // Validate form data
+      if (!taskName.trim()) {
+        toast.error('请输入任务名称');
+        return;
+      }
+
+      if (!type) {
+        toast.error('请选择任务类型');
+        return;
+      }
+
+      if (type === 'text_to_image' && !userPrompt.trim()) {
+        toast.error('请输入提示词');
+        return;
+      }
+
+      if (type === 'image_to_image' && !uploadedImageUrl) {
+        toast.error('图生图模式必须上传参考图片');
+        return;
+      }
+
+      // All validation passed, submit the form
+      setIsSubmitting(true);
+      const formData = new FormData(e.currentTarget);
+      action(formData);
+    },
+    [taskName, type, userPrompt, uploadedImageUrl, action]
+  );
+
   const modalBody = (
-    <form action={action} className="flex flex-col h-full">
+    <form onSubmit={handleSubmit} className="flex flex-col h-full">
       {/* Header Area */}
       <div
         className={cn(
@@ -308,7 +341,6 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
               value={taskName}
               onChange={(e) => setTaskName(e.target.value)}
               placeholder="例如: 产品宣传图-金融风格"
-              required
               className="h-11 text-base shadow-sm transition-shadow focus:shadow-md"
             />
           </div>
@@ -341,7 +373,6 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 isMobile && 'min-h-[160px]'
               )}
               disabled={isAnalyzing}
-              required={type === 'text_to_image'}
             />
           </div>
 
@@ -429,7 +460,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
           </div>
 
           {/* Hidden inputs */}
-          <input type="hidden" name="type" value={type || DEFAULT_TASK_TYPE} />
+          <input type="hidden" name="type" value={type} />
           {uploadedImageUrl && (
             <input type="hidden" name="existingImageUrl" value={uploadedImageUrl} />
           )}
@@ -480,7 +511,6 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
               accept="image/*"
               className="hidden"
               onChange={handleFileChange}
-              required={type === 'image_to_image'}
             />
 
             {previewUrl ? (
@@ -571,13 +601,13 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         </Button>
         <Button
           type="submit"
-          disabled={isPending || isAnalyzing}
+          disabled={isPending || isAnalyzing || isSubmitting}
           className={cn(
             'h-10 px-8 min-w-[140px] shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30',
             isMobile && 'w-full justify-center'
           )}
         >
-          {isPending ? (
+          {isPending || isSubmitting ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               生成中...
