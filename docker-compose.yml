@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: image-generation-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: image_generation
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Application (Next.js)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: image-generation-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Database
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/image_generation
+
+      # Auth
+      AUTH_SECRET: your-secret-key-change-in-production
+      NODE_ENV: production
+
+      # Volcengine TOS
+      VOLCENGINE_ACCESS_KEY: ${VOLCENGINE_ACCESS_KEY}
+      VOLCENGINE_SECRET_KEY: ${VOLCENGINE_SECRET_KEY}
+      VOLCENGINE_REGION: ${VOLCENGINE_REGION}
+      VOLCENGINE_ENDPOINT: ${VOLCENGINE_ENDPOINT}
+      VOLCENGINE_BUCKET_NAME: ${VOLCENGINE_BUCKET_NAME}
+
+      # Doubao VLM
+      ARK_API_KEY: ${ARK_API_KEY}
+      ARK_BASE_URL: ${ARK_BASE_URL}
+      ARK_MODEL: ${ARK_MODEL}
+
+      # Seedream
+      SEEDREAM_API_KEY: ${SEEDREAM_API_KEY}
+      SEEDREAM_BASE_URL: ${SEEDREAM_BASE_URL}
+      SEEDREAM_MODEL: ${SEEDREAM_MODEL}
+      SEEDREAM_CONCURRENCY: ${SEEDREAM_CONCURRENCY:-20}
+
+      # Queue & Cron
+      QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-5}
+      CRON_BATCH_SIZE: ${CRON_BATCH_SIZE:-10}
+      TASK_TIMEOUT_MINUTES: ${TASK_TIMEOUT_MINUTES:-30}
+
+      # Other
+      GIFT_AMOUNT: ${GIFT_AMOUNT:-0}
+      ANALYSIS_PRICE: ${ANALYSIS_PRICE:-0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local

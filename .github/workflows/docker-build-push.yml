@@ -1,0 +1,297 @@
+name: Docker Build and Push
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "Dockerfile"
+      - "package*.json"
+      - "pnpm-lock.yaml"
+      - "db/**"
+      - ".github/workflows/docker-build-push.yml"
+      - "!**/*.md"
+  push:
+    branches: [main, master]
+    paths:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "**/*.js"
+      - "**/*.jsx"
+      - "Dockerfile"
+      - "package*.json"
+      - "pnpm-lock.yaml"
+      - "db/**"
+      - ".github/workflows/docker-build-push.yml"
+      - "!**/*.md"
+
+permissions:
+  pull-requests: write
+  packages: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+
+jobs:
+  build-images:
+    name: Build Docker Images
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-24.04
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Convert repository owner to lowercase
+        id: repo-owner
+        run: |
+          echo "lowercase=${GITHUB_REPOSITORY_OWNER@L}" >> $GITHUB_OUTPUT
+
+      - name: Set up QEMU
+        if: ${{ matrix.arch != runner.arch }}
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' && env.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        if: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ steps.repo-owner.outputs.lowercase }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ steps.repo-owner.outputs.lowercase }}/image-generation
+            ${{ env.DOCKERHUB_USERNAME && format('docker.io/{0}/image-generation', env.DOCKERHUB_USERNAME) || '' }}
+
+      - name: Build for ${{ matrix.arch }}
+        id: docker-build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/${{ matrix.arch }}
+          # PR builds: load locally for validation, Push builds: push by digest
+          push: false
+          load: ${{ github.event_name == 'pull_request' }}
+          outputs: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' && format('type=image,"name=ghcr.io/{0}/image-generation{1}",name-canonical=true,push-by-digest=true,push=true', steps.repo-owner.outputs.lowercase, env.DOCKERHUB_USERNAME && format(',docker.io/{0}/image-generation', env.DOCKERHUB_USERNAME) || '') || '' }}
+          cache-from: type=gha,scope=build-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.arch }}
+
+      - name: Export digest
+        if: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.docker-build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && matrix.arch == 'amd64' && always()
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            const buildSuccess = '${{ steps.docker-build.outcome }}' === 'success';
+            const emoji = buildSuccess ? '✅' : '❌';
+            const status = buildSuccess ? 'Success' : 'Failed';
+
+            let body = `## ${emoji} Image Generation Docker Build ${status}\n\n`;
+            body += `### Build Details\n\n`;
+            body += `| Item | Value |\n`;
+            body += `|------|-------|\n`;
+            body += `| Build Status | ${buildSuccess ? '✅ Passed' : '❌ Failed'} |\n`;
+            body += `| Platforms | linux/amd64 (PR validation) |\n`;
+            body += `| Push to Registry | ⚠️ No (PR build only) |\n`;
+            body += `| Framework | Next.js 16 + Drizzle ORM |\n`;
+            body += `| Base Image | node:current-alpine |\n`;
+            body += `| Standalone Output | ✅ Enabled |\n\n`;
+
+            if (buildSuccess) {
+              body += `### 📦 Multi-arch images will be published after merge\n\n`;
+              body += `**Note**: PR builds only verify the Docker build process for linux/amd64. `;
+              body += `Multi-platform images (amd64 + arm64) are built and pushed to registries only when merged to main.\n\n`;
+              body += `**Registries**:\n`;
+              body += `- GitHub Container Registry: \`ghcr.io/${{ steps.repo-owner.outputs.lowercase }}/image-generation\`\n`;
+              if ('${{ env.DOCKERHUB_USERNAME }}') {
+                body += `- Docker Hub: \`docker.io/${{ env.DOCKERHUB_USERNAME }}/image-generation\`\n`;
+              }
+            } else {
+              body += `### ❌ Build Failed\n\n`;
+              body += `Please check the workflow logs for detailed error information.\n`;
+            }
+
+            body += `\n---\n`;
+            body += `**Commit**: \`${{ github.sha }}\`\n`;
+            body += `**Triggered by**: @${{ github.actor }}\n`;
+
+            try {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+
+              const botComment = comments.find(comment =>
+                comment.user.type === 'Bot' &&
+                comment.body.includes('Image Generation Docker Build')
+              );
+
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: body
+                });
+              }
+            } catch (error) {
+              console.log('Failed to post comment:', error.message);
+              console.log('This might be expected for PRs from forks');
+            }
+
+  release-images:
+    name: Push Multi-Arch Docker Images
+    permissions:
+      packages: write
+    needs: build-images
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name != 'pull_request' && github.actor != 'dependabot[bot]' }}
+
+    steps:
+      - name: Convert repository owner to lowercase
+        id: repo-owner
+        run: |
+          echo "lowercase=${GITHUB_REPOSITORY_OWNER@L}" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        if: ${{ env.DOCKERHUB_USERNAME != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ steps.repo-owner.outputs.lowercase }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ steps.repo-owner.outputs.lowercase }}/image-generation
+            ${{ env.DOCKERHUB_USERNAME && format('docker.io/{0}/image-generation', env.DOCKERHUB_USERNAME) || '' }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.ref == format('refs/heads/{0}', 'master') }}
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          for TAG in $DOCKER_METADATA_OUTPUT_TAGS; do
+            docker buildx imagetools create -t $TAG \
+              $(printf 'ghcr.io/${{ steps.repo-owner.outputs.lowercase }}/image-generation@sha256:%s ' *)
+            sleep 3
+          done
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ghcr.io/${{ steps.repo-owner.outputs.lowercase }}/image-generation:${{ steps.meta.outputs.version }}
+
+      - name: Generate build summary
+        if: always()
+        run: |
+          echo "## 🚀 Multi-Architecture Docker Build & Push Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Status" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "- ✅ Multi-architecture build successful" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Platforms: \`linux/amd64\`, \`linux/arm64\`" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Pushed to GitHub Container Registry: \`ghcr.io/${{ steps.repo-owner.outputs.lowercase }}/image-generation\`" >> $GITHUB_STEP_SUMMARY
+            if [ -n "${{ env.DOCKERHUB_USERNAME }}" ]; then
+              echo "- ✅ Pushed to Docker Hub: \`docker.io/${{ env.DOCKERHUB_USERNAME }}/image-generation\`" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "- ❌ Build or push failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Framework**: Next.js 16 + Drizzle ORM" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit SHA**: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Event**: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build time**: $(date '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Image Tags" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

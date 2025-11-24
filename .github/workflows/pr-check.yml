@@ -1,0 +1,295 @@
+name: PR Check
+
+# Workflow-level permissions (for pull_request events)
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+    types: [opened, synchronize, reopened]
+  # Dedicated trigger for PR comments (with write permissions)
+  pull_request_target:
+    branches: [main, master, develop]
+    types: [opened, synchronize, reopened]
+
+env:
+  NODE_VERSION: "22.9.0"
+  PNPM_VERSION: "10.20.0"
+
+jobs:
+  lint-and-build:
+    name: Lint and Build Check
+    runs-on: ubuntu-latest
+    # Only run on pull_request events (execute code checks)
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run linter
+        run: pnpm run lint
+        continue-on-error: false
+
+      - name: Build project
+        run: pnpm run build
+        continue-on-error: false
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          SKIP_ENV_VALIDATION: 1
+
+      - name: Generate build summary
+        if: always()
+        run: |
+          echo "## 🏗️ Build & Lint Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "| Lint | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+            echo "| Build | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Lint | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+            echo "| Build | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Details" >> $GITHUB_STEP_SUMMARY
+          echo "- **Framework**: Next.js 16 + Drizzle ORM" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${{ github.event.pull_request.head.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: \`${{ github.head_ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author**: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+  docker-build-test:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: lint-and-build
+    # Only run on pull_request events (execute Docker build tests)
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: image-generation
+          tags: |
+            type=ref,event=pr
+            type=sha,prefix=sha-
+
+      - name: Build Docker image (AMD64 only for PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=pr-amd64
+          cache-to: type=gha,mode=max,scope=pr-amd64
+          provenance: false
+          sbom: false
+
+      - name: Generate Docker build summary
+        if: always()
+        run: |
+          echo "## 🐳 Docker Build Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Status" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "- ✅ Docker image build successful" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Platform: \`linux/amd64\`" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Cache optimization enabled" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Using standalone output mode" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Docker image build failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Troubleshooting Tips" >> $GITHUB_STEP_SUMMARY
+            echo "- Check Dockerfile syntax" >> $GITHUB_STEP_SUMMARY
+            echo "- Verify dependency versions" >> $GITHUB_STEP_SUMMARY
+            echo "- Review build context" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # 🔒 Safe PR comment job (uses pull_request_target, but does not checkout external code)
+  pr-comment:
+    name: Comment PR Results
+    runs-on: ubuntu-latest
+    # Only run on pull_request_target events (with write permissions)
+    if: github.event_name == 'pull_request_target'
+    # No 'needs' dependency - we'll wait for checks via API
+    permissions:
+      issues: write
+      pull-requests: write
+      actions: read
+
+    steps:
+      # 🔒 IMPORTANT: Do not checkout any code, especially PR code!
+      # 🔒 Only use GitHub API to retrieve workflow run results
+
+      - name: Wait for checks to complete
+        uses: actions/github-script@v7
+        id: wait-checks
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const headSha = context.payload.pull_request.head.sha;
+            console.log(`Waiting for checks on commit ${headSha} to complete...`);
+
+            // Wait for maximum 10 minutes
+            const maxWaitTime = 10 * 60 * 1000;
+            const startTime = Date.now();
+
+            while (Date.now() - startTime < maxWaitTime) {
+              try {
+                const { data: checkRuns } = await github.rest.checks.listForRef({
+                  owner,
+                  repo,
+                  ref: headSha,
+                });
+
+                // Find our checks - filter all matches, then find non-skipped one
+                const lintBuilds = checkRuns.check_runs.filter(run =>
+                  run.name === 'Lint and Build Check'
+                );
+                const dockerBuilds = checkRuns.check_runs.filter(run =>
+                  run.name === 'Docker Build Test'
+                );
+
+                // Prefer non-skipped check runs, fallback to first one if all are skipped
+                const lintBuild = lintBuilds.find(run => run.conclusion !== 'skipped') || lintBuilds[0];
+                const dockerBuild = dockerBuilds.find(run => run.conclusion !== 'skipped') || dockerBuilds[0];
+
+                if (lintBuild && dockerBuild) {
+                  console.log(`Lint & Build: ${lintBuild.status}, Docker Build: ${dockerBuild.status}`);
+
+                  if (lintBuild.status === 'completed' && dockerBuild.status === 'completed') {
+                    console.log(`Checks completed - Lint: ${lintBuild.conclusion}, Docker: ${dockerBuild.conclusion}`);
+                    return {
+                      completed: true,
+                      lintConclusion: lintBuild.conclusion,
+                      dockerConclusion: dockerBuild.conclusion,
+                      lintUrl: lintBuild.details_url,
+                      dockerUrl: dockerBuild.details_url
+                    };
+                  }
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 30000));
+              } catch (error) {
+                console.log(`Error fetching check status: ${error.message}`);
+                await new Promise(resolve => setTimeout(resolve, 30000));
+              }
+            }
+
+            return {
+              completed: false,
+              lintConclusion: 'timed_out',
+              dockerConclusion: 'timed_out'
+            };
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkResult = ${{ steps.wait-checks.outputs.result }};
+            const prNumber = context.payload.pull_request.number;
+            const commitSha = context.payload.pull_request.head.sha;
+            const branchName = context.payload.pull_request.head.ref;
+
+            // Security: Sanitize branch name for safe display in Markdown
+            const safeBranchName = branchName.replace(/[`\[\]]/g, '\\$&');
+
+            let allPassed = checkResult.lintConclusion === 'success' && checkResult.dockerConclusion === 'success';
+            let emoji = allPassed ? '✅' : '❌';
+            let status = allPassed ? 'Passed' : 'Failed';
+
+            let body = `## ${emoji} PR Check Results: ${status}\n\n`;
+            body += `### Build Checks\n\n`;
+            body += `| Check | Status |\n`;
+            body += `|-------|--------|\n`;
+            body += `| Lint & Build | ${checkResult.lintConclusion === 'success' ? '✅ Passed' : '❌ Failed'} |\n`;
+            body += `| Docker Build | ${checkResult.dockerConclusion === 'success' ? '✅ Passed' : '❌ Failed'} |\n\n`;
+
+            if (allPassed) {
+              body += `### ✨ Great work!\n\n`;
+              body += `All checks passed successfully. Your PR is ready for review.\n\n`;
+              body += `**Details:**\n`;
+              body += `- ✅ Code quality verified (linting passed)\n`;
+              body += `- ✅ Build successful (Next.js 16 + Drizzle ORM)\n`;
+              body += `- ✅ Docker image build verified (linux/amd64)\n`;
+            } else {
+              body += `### ⚠️ Action Required\n\n`;
+              body += `Some checks failed. Please review the errors and update your PR.\n\n`;
+              if (checkResult.lintConclusion !== 'success') {
+                body += `**Lint/Build Issues:**\n`;
+                body += `- Check the "Lint and Build Check" job for details\n`;
+                body += `- Fix linting errors with \`pnpm run lint:fix\`\n`;
+                body += `- Ensure the project builds locally with \`pnpm run build\`\n\n`;
+              }
+              if (checkResult.dockerConclusion !== 'success') {
+                body += `**Docker Build Issues:**\n`;
+                body += `- Check the "Docker Build Test" job for details\n`;
+                body += `- Verify Dockerfile changes\n`;
+                body += `- Test Docker build locally\n\n`;
+              }
+            }
+
+            body += `**Commit:** \`${commitSha}\`\n`;
+            body += `**Branch:** \`${safeBranchName}\`\n`;
+
+            if (checkResult.lintUrl || checkResult.dockerUrl) {
+              body += `\n**🔗 View Details:**\n`;
+              if (checkResult.lintUrl) body += `- [Lint & Build](${checkResult.lintUrl})\n`;
+              if (checkResult.dockerUrl) body += `- [Docker Build](${checkResult.dockerUrl})\n`;
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('PR Check Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+              console.log('✅ Successfully updated existing PR comment');
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: body
+              });
+              console.log('✅ Successfully created new PR comment');
+            }

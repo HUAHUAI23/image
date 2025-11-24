@@ -38,19 +38,40 @@ interface BillingModalProps {
 }
 
 export function BillingModal({ open, onOpenChange }: BillingModalProps) {
-  const [balance, setBalance] = useState<number>(0);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<{
+    balance: number;
+    transactions: Transaction[];
+    isLoading: boolean;
+  }>({
+    balance: 0,
+    transactions: [],
+    isLoading: true,
+  });
+
+  const { balance, transactions, isLoading } = data;
+  const loading = open && isLoading;
 
   useEffect(() => {
-    if (open) {
-      setLoading(true);
-      Promise.all([getBalanceAction(), getTransactionsAction()]).then(([bal, txs]) => {
-        setBalance(bal);
-        setTransactions(txs as any[]);
-        setLoading(false);
+    if (!open) return;
+
+    // Fetch data when modal opens
+    Promise.all([getBalanceAction(), getTransactionsAction()])
+      .then(([bal, txs]) => {
+        setData({
+          balance: bal,
+          transactions: txs as Transaction[],
+          isLoading: false,
+        });
+      })
+      .catch((error) => {
+        console.error('Failed to fetch billing data:', error);
+        setData((prev) => ({ ...prev, isLoading: false }));
       });
-    }
+
+    // Reset loading state when modal closes
+    return () => {
+      setData((prev) => ({ ...prev, isLoading: true }));
+    };
   }, [open]);
 
   return (
@@ -72,7 +93,7 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
           <div className="flex flex-col h-[500px]">
             {/* Cards Section */}
             <div className="p-6 grid grid-cols-2 gap-4 shrink-0">
-              <div className="rounded-xl bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border p-5 relative overflow-hidden group">
+              <div className="rounded-xl bg-linear-to-br from-primary/10 via-primary/5 to-transparent border p-5 relative overflow-hidden group">
                 <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity group-hover:scale-110 duration-500">
                   <Wallet className="w-24 h-24 -mr-8 -mt-8" />
                 </div>
