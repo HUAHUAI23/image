@@ -7,7 +7,6 @@ import {
   Clock,
   CreditCard,
   Loader2,
-  Receipt,
   TrendingDown,
   Wallet,
 } from 'lucide-react';

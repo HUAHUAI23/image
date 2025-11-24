@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { decrypt } from '@/lib/auth'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const session = request.cookies.get('session')?.value
   const isLoginPage = request.nextUrl.pathname === '/login'
 

@@ -61,6 +61,7 @@
     "fastq": "^1.19.1",
     "input-otp": "^1.4.2",
     "jose": "^6.1.2",
+    "jszip": "^3.10.1",
     "langchain": "^1.0.6",
     "liquidjs": "^10.24.0",
     "lucide-react": "^0.554.0",
