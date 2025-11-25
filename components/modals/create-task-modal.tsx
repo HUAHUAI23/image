@@ -480,12 +480,12 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 <Input
                   type="number"
                   min={1}
-                  max={20}
+                  max={500}
                   value={imageNumber}
                   onChange={(e) => {
                     const value = parseInt(e.target.value, 10);
                     const normalized = Number.isNaN(value) ? DEFAULT_IMAGE_NUMBER : value;
-                    const clampedValue = Math.max(1, Math.min(20, normalized));
+                    const clampedValue = Math.max(1, Math.min(500, normalized));
                     setValue('imageNumber', clampedValue, {
                       shouldValidate: true,
                       shouldDirty: true,
@@ -496,17 +496,17 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                     if (Number.isNaN(value) || value < 1) {
                       setValue('imageNumber', 1, { shouldValidate: true });
                       toast.error('图片数量不能小于1');
-                    } else if (value > 20) {
-                      setValue('imageNumber', 20, { shouldValidate: true });
-                      toast.error('图片数量不能超过20');
+                    } else if (value > 500) {
+                      setValue('imageNumber', 500, { shouldValidate: true });
+                      toast.error('图片数量不能超过500');
                     }
                   }}
-                  placeholder="1-20"
+                  placeholder="1-500"
                   className="h-11 w-full shadow-sm pr-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none select-none">
                   <span className="text-sm text-muted-foreground">张</span>
-                  <span className="text-xs text-muted-foreground/40">/ 20</span>
+                  <span className="text-xs text-muted-foreground/40">/ 500</span>
                 </div>
               </div>
               {errors.imageNumber && (
