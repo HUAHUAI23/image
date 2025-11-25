@@ -34,9 +34,12 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { formatCurrency } from '@/lib/const';
 import { cn } from '@/lib/utils';
 import {
+  calculateExpectedImageCount,
   createTaskFormSchema,
   CreateTaskFormValues,
   DEFAULT_IMAGE_NUMBER,
+  DEFAULT_SEQUENTIAL_MODE,
+  DEFAULT_SIZE,
   DEFAULT_TASK_TYPE,
   DEFAULT_TEMPLATE_ID,
 } from '@/lib/validations/task';
@@ -73,6 +76,14 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
       imageNumber: DEFAULT_IMAGE_NUMBER,
       existingImageUrl: '',
       hasLocalImage: false,
+      generationOptions: {
+        size: DEFAULT_SIZE,
+        sequentialImageGeneration: DEFAULT_SEQUENTIAL_MODE,
+        watermark: false,
+        optimizePromptOptions: {
+          mode: 'standard',
+        },
+      },
     },
   });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -88,8 +99,10 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
   const normalizedType = watch('type') || DEFAULT_TASK_TYPE;
   const taskName = watch('name');
   const imageNumber = watch('imageNumber');
+  const generationOptions = watch('generationOptions');
   const isImageTask = normalizedType === 'image_to_image';
   const isTextTask = normalizedType === 'text_to_image';
+  const isSequentialMode = generationOptions?.sequentialImageGeneration === 'auto';
   const handleTypeChange = useCallback(
     (nextType: string) => {
       const safeType: CreateTaskFormValues['type'] =
@@ -122,6 +135,14 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
       imageNumber: DEFAULT_IMAGE_NUMBER,
       existingImageUrl: '',
       hasLocalImage: false,
+      generationOptions: {
+        size: DEFAULT_SIZE,
+        sequentialImageGeneration: DEFAULT_SEQUENTIAL_MODE,
+        watermark: false,
+        optimizePromptOptions: {
+          mode: 'standard',
+        },
+      },
     });
     cleanupPreview();
     setSelectedFile(null);
@@ -274,9 +295,15 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     );
   }, [prices, normalizedType]);
 
+  // 计算预期生成的图片数量（用于预付费）
+  const expectedImageCount = useMemo(() => {
+    return calculateExpectedImageCount(imageNumber, generationOptions);
+  }, [imageNumber, generationOptions]);
+
+  // 计算预估费用
   const estimatedCost = useMemo(() => {
-    return perImagePrice * imageNumber;
-  }, [perImagePrice, imageNumber]);
+    return perImagePrice * expectedImageCount;
+  }, [perImagePrice, expectedImageCount]);
 
   // Reset form when modal closes and prevent stale async updates
   useEffect(() => {
@@ -305,6 +332,10 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
         }
         if (selectedFile) {
           payload.append('image', selectedFile);
+        }
+        // 添加生成选项
+        if (values.generationOptions) {
+          payload.append('generationOptions', JSON.stringify(values.generationOptions));
         }
 
         const response = await fetch('/api/tasks', {
@@ -455,7 +486,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 control={control}
                 render={({ field }) => (
                   <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger className="h-11! w-full shadow-sm">
+                    <SelectTrigger className="h-11 w-full shadow-sm">
                       <SelectValue placeholder="选择风格模板..." />
                     </SelectTrigger>
                     <SelectContent>
@@ -475,7 +506,37 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
             </div>
 
             <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground/80">生成数量</Label>
+              <Label className="text-sm font-medium text-foreground/80">图片尺寸</Label>
+              <Controller
+                name="generationOptions.size"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="h-11 w-full shadow-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1K">1K (智能尺寸)</SelectItem>
+                      <SelectItem value="2K">2K (智能尺寸)</SelectItem>
+                      <SelectItem value="4K">4K (智能尺寸)</SelectItem>
+                      <SelectItem value="2048x2048">2048×2048 (1:1)</SelectItem>
+                      <SelectItem value="2560x1440">2560×1440 (16:9)</SelectItem>
+                      <SelectItem value="1440x2560">1440×2560 (9:16)</SelectItem>
+                      <SelectItem value="2304x1728">2304×1728 (4:3)</SelectItem>
+                      <SelectItem value="1728x2304">1728×2304 (3:4)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </div>
+          </div>
+
+          {/* Batch Size and Sequential Mode */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-foreground/80">
+                {isSequentialMode ? '批次数量' : '生成数量'}
+              </Label>
               <div className="relative">
                 <Input
                   type="number"
@@ -495,17 +556,19 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                     const value = parseInt(e.target.value, 10);
                     if (Number.isNaN(value) || value < 1) {
                       setValue('imageNumber', 1, { shouldValidate: true });
-                      toast.error('图片数量不能小于1');
+                      toast.error('数量不能小于1');
                     } else if (value > 500) {
                       setValue('imageNumber', 500, { shouldValidate: true });
-                      toast.error('图片数量不能超过500');
+                      toast.error('数量不能超过500');
                     }
                   }}
                   placeholder="1-500"
-                  className="h-11 w-full shadow-sm pr-12 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="h-11 w-full shadow-sm pr-16 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none select-none">
-                  <span className="text-sm text-muted-foreground">张</span>
+                  <span className="text-sm text-muted-foreground">
+                    {isSequentialMode ? '批' : '张'}
+                  </span>
                   <span className="text-xs text-muted-foreground/40">/ 500</span>
                 </div>
               </div>
@@ -513,26 +576,117 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 <p className="text-xs text-destructive">{errors.imageNumber.message}</p>
               )}
             </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-foreground/80">组图模式</Label>
+              <Controller
+                name="generationOptions.sequentialImageGeneration"
+                control={control}
+                render={({ field }) => (
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="h-11 w-full shadow-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="disabled">关闭 (每批生成1张)</SelectItem>
+                      <SelectItem value="auto">开启 (AI智能生成组图)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              <p className="text-[10px] text-muted-foreground/60">
+                {isSequentialMode ? '⚠️ 开启后每批可能生成多张关联图片' : '每批固定生成1张图片'}
+              </p>
+            </div>
           </div>
+
+          {/* Sequential Mode Options */}
+          {isSequentialMode && (
+            <div className="p-4 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-800/30 rounded-lg space-y-3">
+              <div className="flex items-start gap-2">
+                <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <div className="flex-1 space-y-2">
+                  <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                    组图模式已开启
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
+                    AI
+                    将根据提示词智能判断每批生成的图片数量。您可以设置每批最多生成的图片数量，未设置时默认最多15张。
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-medium text-amber-900 dark:text-amber-100">
+                  每批最多生成 (可选)
+                </Label>
+                <Controller
+                  name="generationOptions.sequentialImageGenerationOptions.maxImages"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value?.toString() || 'auto'}
+                      onValueChange={(v) => field.onChange(v === 'auto' ? undefined : parseInt(v))}
+                    >
+                      <SelectTrigger className="h-9 bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">由 AI 决定 (最多15张)</SelectItem>
+                        {[3, 5, 8, 10, 12, 15].map((n) => (
+                          <SelectItem key={n} value={n.toString()}>
+                            最多 {n} 张
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Price Estimation */}
           <div
             className={cn(
-              'flex items-center justify-between px-4 py-3 bg-primary/5 rounded-lg border border-primary/10',
-              isMobile && 'flex-col items-start gap-2'
+              'px-4 py-3 bg-primary/5 rounded-lg border border-primary/10 space-y-2',
+              isMobile && 'space-y-3'
             )}
           >
-            <div className="flex items-center gap-2 text-sm text-primary/80 font-medium">
-              <Sparkles className="w-4 h-4" />
-              <span>预计消耗点数</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-primary/80 font-medium">
+                <Sparkles className="w-4 h-4" />
+                <span>预计消耗点数</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-bold text-primary">
+                  {formatCurrency(estimatedCost)}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xl font-bold text-primary">
-                {formatCurrency(estimatedCost)}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                ({formatCurrency(perImagePrice)} / 张)
-              </span>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <div className="flex items-center justify-between">
+                <span>单张价格:</span>
+                <span>{formatCurrency(perImagePrice)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>预期图片数:</span>
+                <span>
+                  {expectedImageCount} 张
+                  {isSequentialMode && expectedImageCount !== imageNumber && (
+                    <span className="ml-1 text-amber-600 dark:text-amber-400">
+                      ({imageNumber} 批 × 最多{' '}
+                      {generationOptions?.sequentialImageGenerationOptions?.maxImages || 15} 张)
+                    </span>
+                  )}
+                </span>
+              </div>
+              {isSequentialMode && (
+                <div className="pt-1 mt-1 border-t border-primary/10">
+                  <p className="text-amber-600 dark:text-amber-400 text-[10px]">
+                    💡 组图模式：预付费按最大值计算，实际生成后会自动退还多余点数
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>

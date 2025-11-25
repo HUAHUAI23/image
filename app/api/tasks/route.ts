@@ -7,7 +7,11 @@ import { getSession } from '@/lib/auth'
 import { formatCurrency } from '@/lib/const'
 import { logger as baseLogger } from '@/lib/logger'
 import { uploadFileToTempTOS } from '@/lib/tos'
-import { createTaskPayloadSchema } from '@/lib/validations/task'
+import {
+  calculateExpectedImageCount,
+  createTaskPayloadSchema,
+  generationOptionsSchema,
+} from '@/lib/validations/task'
 
 const logger = baseLogger.child({ module: 'app/api/tasks' })
 
@@ -42,6 +46,19 @@ export async function POST(request: NextRequest) {
   const existingImageUrlValue = formData.get('existingImageUrl')
   const templatePromptIdValue = parseTemplateId(formData.get('templateId'))
   const imageNumberValue = formData.get('imageNumber')
+  const generationOptionsValue = formData.get('generationOptions')
+
+  // 解析生成选项
+  let parsedGenerationOptions: any = undefined
+  if (typeof generationOptionsValue === 'string' && generationOptionsValue.trim().length > 0) {
+    try {
+      const parsed = JSON.parse(generationOptionsValue)
+      const validated = generationOptionsSchema.safeParse(parsed)
+      parsedGenerationOptions = validated.success ? validated.data : undefined
+    } catch (error) {
+      logger.warn({ error }, 'Failed to parse generationOptions')
+    }
+  }
 
   const normalizedPayload = {
     type: typeof typeValue === 'string' ? (typeValue as string) : undefined,
@@ -53,6 +70,7 @@ export async function POST(request: NextRequest) {
       typeof existingImageUrlValue === 'string' && existingImageUrlValue.trim().length > 0
         ? existingImageUrlValue.trim()
         : null,
+    generationOptions: parsedGenerationOptions,
   }
 
   const validation = createTaskPayloadSchema.safeParse(normalizedPayload)
@@ -65,7 +83,8 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { type, name, userPrompt, templatePromptId, imageNumber } = validation.data
+  const { type, name, userPrompt, templatePromptId, imageNumber, generationOptions } =
+    validation.data
   let originalImageUrl = validation.data.existingImageUrl
 
   if (!originalImageUrl && file && file.size > 0) {
@@ -100,9 +119,17 @@ export async function POST(request: NextRequest) {
       }
 
       const pricePerImage = priceRecord.price
-      const totalCost = pricePerImage * imageNumber
 
-      logger.info(`[Task] Creating task: ${imageNumber} images × ${pricePerImage} = ${totalCost}`)
+      // 计算预期生成的图片数量（用于预付费）
+      // 如果 generationOptions 为空，使用传统模式（imageNumber = expectedImageCount）
+      const expectedImageCount = generationOptions
+        ? calculateExpectedImageCount(imageNumber, generationOptions)
+        : imageNumber
+      const totalCost = pricePerImage * expectedImageCount
+
+      logger.info(
+        `[Task] Creating task: ${imageNumber} batches, expected ${expectedImageCount} images (${pricePerImage}/image) = ${totalCost} total`
+      )
 
       const accountRecord = await tx.query.accounts.findFirst({
         where: eq(accounts.userId, session.userId),
@@ -132,6 +159,9 @@ export async function POST(request: NextRequest) {
           originalImageUrl: originalImageUrl ?? null,
           imageNumber,
           priceUnit: 'per_image',
+          generationOptions: generationOptions ? generationOptions : { size: '2K' }, // 提供默认值
+          expectedImageCount,
+          actualImageCount: 0,
         })
         .returning()
 
@@ -152,7 +182,7 @@ export async function POST(request: NextRequest) {
       })
 
       logger.info(
-        `[Task] Task ${newTask.id} created, charged ${totalCost} (${imageNumber} × ${pricePerImage}), balance: ${accountRecord.balance} → ${newBalance}`
+        `[Task] Task ${newTask.id} created, charged ${totalCost} (expected ${expectedImageCount} images × ${pricePerImage}), balance: ${accountRecord.balance} → ${newBalance}`
       )
 
       return { success: true, status: 201, taskId: newTask.id } as const
