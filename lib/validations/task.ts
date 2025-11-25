@@ -24,7 +24,11 @@ export const createTaskFormSchema = z
       .refine((value) => value === DEFAULT_TEMPLATE_ID || /^\d+$/.test(value), {
         message: '风格模板格式错误',
       }),
-    imageNumber: z.coerce.number().int().min(1, '图片数量至少为 1').max(20, '图片数量不能超过 20'),
+    imageNumber: z.coerce
+      .number()
+      .int()
+      .min(1, '图片数量至少为 1')
+      .max(500, '图片数量不能超过 500'),
     existingImageUrl: imageUrlField.optional().transform((value) => value ?? ''),
     hasLocalImage: z.boolean().default(false),
   })
@@ -54,7 +58,7 @@ export const createTaskPayloadSchema = z
       .optional()
       .transform((value) => value ?? ''),
     templatePromptId: z.number().int().positive().nullable(),
-    imageNumber: z.number().int().min(1, '图片数量至少为 1').max(20, '图片数量不能超过 20'),
+    imageNumber: z.number().int().min(1, '图片数量至少为 1').max(500, '图片数量不能超过 500'),
     existingImageUrl: z.url('图片地址格式不正确').nullable(),
   })
   .refine((data) => data.type !== 'text_to_image' || data.userPrompt.length > 0, {

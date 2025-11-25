@@ -1,0 +1,95 @@
+# Gitleaks Configuration File
+# https://github.com/gitleaks/gitleaks
+
+title = "Image Generation Platform - Gitleaks Config"
+
+[extend]
+# Extend the default configuration
+useDefault = true
+
+# Allowlist specific patterns that are not actual secrets
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(?:api[_-]?key|apikey|api[_-]?secret)[\s]*[=:>]{1,3}[\s]*['"]?([0-9a-zA-Z\-_]{20,})['"]?'''
+secretGroup = 1
+
+[rules.allowlist]
+# Allow example/placeholder API keys in documentation
+regexes = [
+  '''(example|sample|placeholder|dummy|test|fake|your[_-]?api[_-]?key)''',
+  '''sk-proj-[A-Za-z0-9-_]{20,}''', # OpenAI API key format (if using examples)
+]
+paths = [
+  '''.*\.md$''',           # Markdown documentation
+  '''.*\.example$''',      # Example files
+  '''.*\.sample$''',       # Sample files
+  '''CLAUDE\.md''',        # Project documentation
+  '''README\.md''',        # README files
+]
+
+[[rules]]
+id = "jwt-token"
+description = "JWT Token"
+regex = '''eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'''
+
+[rules.allowlist]
+# Allow JWT examples in tests and documentation
+paths = [
+  '''.*test.*''',
+  '''.*\.md$''',
+  '''.*\.example$''',
+]
+
+[[rules]]
+id = "database-connection-string"
+description = "Database Connection String"
+regex = '''(?i)(postgres|postgresql|mysql|mongodb|redis)://[^\s'"]+'''
+
+[rules.allowlist]
+# Allow example connection strings
+regexes = [
+  '''(localhost|127\.0\.0\.1|example\.com|your[_-]?host)''',
+]
+paths = [
+  '''.*\.md$''',
+  '''.*\.example$''',
+  '''CLAUDE\.md''',
+  '''DOCKER\.md''',
+]
+
+# Global allowlist
+[allowlist]
+description = "Global allowlist for common false positives"
+
+# Allow specific file patterns
+paths = [
+  '''^\.git/.*''',                    # Git metadata
+  '''^node_modules/.*''',             # Dependencies
+  '''^\.next/.*''',                   # Next.js build output
+  '''^pnpm-lock\.yaml$''',            # Lock file
+  '''^package-lock\.json$''',         # Lock file
+  '''.*\.lock$''',                    # All lock files
+  '''^\.env\.example$''',             # Example env file
+  '''^\.env\.template$''',            # Template env file
+  '''\.map$''',                       # Source maps
+  '''\.min\.js$''',                   # Minified files
+]
+
+# Allow specific commit SHAs (if needed for specific commits with false positives)
+commits = []
+
+# Stopwords that indicate non-secret values
+stopwords = [
+  "example",
+  "sample",
+  "placeholder",
+  "dummy",
+  "test",
+  "fake",
+  "your-api-key",
+  "your-secret",
+  "change-me",
+  "replace-me",
+  "xxxxxx",
+]
