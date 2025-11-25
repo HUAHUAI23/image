@@ -123,8 +123,23 @@ export const tasks = pgTable(
       .default(sql`'[]'::jsonb`)
       .notNull(),
     imageNumber: integer('image_number').notNull().default(4),
-    priceUnit: priceUnitEnum('price_unit').notNull().default('per_image'), // 新增：记录该任务的计费方式
-    tokenCount: integer('token_count'), // 新增：如果按 token 计费，记录使用的 token 数量
+    priceUnit: priceUnitEnum('price_unit').notNull().default('per_image'), // 计费方式
+    tokenCount: integer('token_count'), // 如果按 token 计费，记录使用的 token 数量
+    generationOptions: jsonb('generation_options')
+      .$type<{
+        size?: string // 图片尺寸，如 '2K', '2048x2048' 等
+        sequentialImageGeneration?: 'auto' | 'disabled' // 是否启用组图模式
+        sequentialImageGenerationOptions?: {
+          maxImages?: number // 组图模式下的最大图片数量 (1-15)
+        }
+        optimizePromptOptions?: {
+          mode?: 'standard' | 'fast' // 提示词优化模式
+        }
+        watermark?: boolean // 是否添加水印
+      }>()
+      .default(sql`'{}'::jsonb`), // 用户指定的生成参数（可为空，兼容旧数据）
+    expectedImageCount: integer('expected_image_count'), // 预期生成的图片数量（用于预付费计算，旧数据可能为空）
+    actualImageCount: integer('actual_image_count').default(0).notNull(), // 实际生成的图片数量（用于退款计算）
     errorDetails: jsonb('error_details')
       .$type<{
         summary?: string // Overall error summary

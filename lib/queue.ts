@@ -3,11 +3,12 @@ import type { queueAsPromised } from 'fastq'
 import fastq from 'fastq'
 
 import { db } from '@/db'
-import { accounts, promptTemplates,tasks, transactions } from '@/db/schema'
+import { accounts, promptTemplates, tasks, transactions } from '@/db/schema'
 import { env } from '@/lib/env'
 import { generateImagesDetailed } from '@/lib/image-generation'
 import { logger as baseLogger } from '@/lib/logger'
 import { uploadToTOS } from '@/lib/tos'
+import type { GenerationOptions } from '@/lib/validations/task'
 
 const logger = baseLogger.child({ module: 'lib/queue' })
 
@@ -30,6 +31,9 @@ type TaskRecord = {
   originalImageUrl: string | null
   imageNumber: number
   priceUnit: 'per_image' | 'per_token'
+  generationOptions: GenerationOptions | null // 兼容旧数据
+  expectedImageCount: number | null // 兼容旧数据
+  actualImageCount: number
 }
 
 type ImageGenerationResult = {
@@ -67,7 +71,8 @@ async function validateAndLockTask(taskId: number): Promise<TaskRecord> {
              t.name, t.type, t.status,
              t.user_prompt as "userPrompt", t.template_prompt_id as "templatePromptId",
              t.original_image_url as "originalImageUrl", t.image_number as "imageNumber",
-             t.price_unit as "priceUnit"
+             t.price_unit as "priceUnit", t.generation_options as "generationOptions",
+             t.expected_image_count as "expectedImageCount", t.actual_image_count as "actualImageCount"
       FROM tasks t
       INNER JOIN accounts a ON t.account_id = a.id
       WHERE t.id = ${taskId} AND t.status = 'processing'
@@ -95,10 +100,7 @@ async function validateAndLockTask(taskId: number): Promise<TaskRecord> {
  * Update task heartbeat to indicate it's still processing
  */
 async function updateTaskHeartbeat(taskId: number) {
-  await db
-    .update(tasks)
-    .set({ updatedAt: new Date() })
-    .where(eq(tasks.id, taskId))
+  await db.update(tasks).set({ updatedAt: new Date() }).where(eq(tasks.id, taskId))
   logger.debug(`Updated heartbeat for task ${taskId}`)
 }
 
@@ -146,13 +148,28 @@ async function generateImages(
   taskRecord: TaskRecord,
   templateContent: string | undefined
 ): Promise<ImageGenerationResult> {
-  logger.info(`Generating ${taskRecord.imageNumber} images for task ${taskRecord.id}`)
+  // Handle null generationOptions for legacy tasks
+  const opts = taskRecord.generationOptions || {
+    size: '2K',
+    sequentialImageGeneration: 'disabled',
+    watermark: false,
+  }
+  const isSequentialMode = opts.sequentialImageGeneration === 'auto'
+
+  logger.info(
+    `Generating ${taskRecord.imageNumber} batches for task ${taskRecord.id} (sequential: ${isSequentialMode})`
+  )
 
   const result = await generateImagesDetailed({
     originalImageUrl: taskRecord.originalImageUrl || undefined,
     userPrompt: taskRecord.userPrompt!,
     templatePrompt: templateContent,
     imageCount: taskRecord.imageNumber,
+    size: opts.size,
+    sequentialImageGeneration: opts.sequentialImageGeneration,
+    sequentialImageGenerationOptions: opts.sequentialImageGenerationOptions,
+    optimizePromptOptions: opts.optimizePromptOptions,
+    watermark: opts.watermark,
   })
 
   logger.info(
@@ -236,17 +253,26 @@ function determineFinalStatus(
 // ==================== Refund Handling ====================
 
 /**
- * Handle partial refund for failed/partial_success tasks
+ * Handle refund based on expected vs actual image count
+ * New logic: refund = (expectedImageCount - actualImageCount) × pricePerImage
+ * Falls back to old logic if expectedImageCount is null (legacy tasks)
  * NOTE: This function must be called within a transaction context
  */
-async function handlePartialRefundInTx(
+async function handleRefundInTx(
   tx: any,
   taskId: number,
   accountId: number,
   priceUnit: 'per_image' | 'per_token',
-  totalRequested: number,
-  successCount: number
+  expectedImageCount: number | null,
+  actualImageCount: number,
+  totalRequestedImages: number // fallback for legacy tasks
 ) {
+  // Only handle per_image for now
+  if (priceUnit !== 'per_image') {
+    logger.warn(`per_token refund not yet implemented for task ${taskId}`)
+    return
+  }
+
   // Get original charge transaction
   const txRecord = await tx.query.transactions.findFirst({
     where: eq(transactions.taskId, taskId),
@@ -257,18 +283,36 @@ async function handlePartialRefundInTx(
     return
   }
 
-  // Calculate refund amount based on pricing model
   let refundAmount = 0
 
-  if (priceUnit === 'per_image') {
-    const failureCount = totalRequested - successCount
-    refundAmount = Math.round((txRecord.amount * failureCount) / totalRequested)
+  // New logic: use expectedImageCount if available
+  if (expectedImageCount !== null && expectedImageCount !== undefined) {
+    const overchargedCount = expectedImageCount - actualImageCount
+    if (overchargedCount <= 0) {
+      logger.info(`No refund needed for task ${taskId} (actual >= expected)`)
+      return
+    }
+
+    // pricePerImage = totalCharged / expectedImageCount
+    const pricePerImage = Math.round(txRecord.amount / expectedImageCount)
+    refundAmount = overchargedCount * pricePerImage
+
     logger.info(
-      `Calculating refund: ${failureCount} failed / ${totalRequested} total = ${refundAmount}`
+      `Calculating refund (new logic): (${expectedImageCount} expected - ${actualImageCount} actual) × ${pricePerImage} = ${refundAmount}`
     )
-  } else if (priceUnit === 'per_token') {
-    logger.warn(`per_token refund not yet implemented for task ${taskId}`)
-    return
+  } else {
+    // Legacy logic: use totalRequestedImages (for old tasks without expectedImageCount)
+    const failureCount = totalRequestedImages - actualImageCount
+    if (failureCount <= 0) {
+      logger.info(`No refund needed for task ${taskId} (legacy, no failures)`)
+      return
+    }
+
+    refundAmount = Math.round((txRecord.amount * failureCount) / totalRequestedImages)
+
+    logger.info(
+      `Calculating refund (legacy logic): ${failureCount} failed / ${totalRequestedImages} total = ${refundAmount}`
+    )
   }
 
   if (refundAmount <= 0) {
@@ -303,9 +347,15 @@ async function handlePartialRefundInTx(
 
 /**
  * Handle full refund for completely failed tasks
+ * Refunds the entire pre-paid amount
  * NOTE: This function must be called within a transaction context
  */
-async function handleFullRefundInTx(tx: any, taskId: number, accountId: number) {
+async function handleFullRefundInTx(
+  tx: any,
+  taskId: number,
+  accountId: number,
+  expectedImageCount?: number | null
+) {
   // Get original charge transaction
   const txRecord = await tx.query.transactions.findFirst({
     where: eq(transactions.taskId, taskId),
@@ -339,7 +389,8 @@ async function handleFullRefundInTx(tx: any, taskId: number, accountId: number) 
     balanceAfter: newBalance,
   })
 
-  logger.info(`Full refund ${txRecord.amount} for task ${taskId}`)
+  const expectedInfo = expectedImageCount ? ` (expected ${expectedImageCount} images, got 0)` : ''
+  logger.info(`Full refund ${txRecord.amount} for task ${taskId}${expectedInfo}`)
 }
 
 // ==================== Task Failure Handling ====================
@@ -361,18 +412,19 @@ async function handleTaskFailure(task: Task, errorMsg: string) {
       return
     }
 
-    // Update task status to failed
+    // Update task status to failed and set actualImageCount to 0
     await tx
       .update(tasks)
       .set({
         status: 'failed',
+        actualImageCount: 0,
         errorDetails: { summary: errorMsg },
         updatedAt: new Date(),
       })
       .where(eq(tasks.id, task.id))
 
     // Issue full refund (within same transaction)
-    await handleFullRefundInTx(tx, task.id, taskRecord.accountId)
+    await handleFullRefundInTx(tx, task.id, taskRecord.accountId, taskRecord.expectedImageCount)
   })
 }
 
@@ -414,7 +466,7 @@ async function processTask(task: Task) {
 
     // Step 8: Update task status and handle refund in a single transaction
     await db.transaction(async (tx) => {
-      // Update task status
+      // Update task status and actualImageCount
       const errorDetails =
         allErrors.length > 0
           ? {
@@ -430,23 +482,24 @@ async function processTask(task: Task) {
         .update(tasks)
         .set({
           status: finalStatus,
+          actualImageCount: finalSuccessCount,
           generatedImageUrls: uploadResult.uploadedUrls,
           errorDetails,
           updatedAt: new Date(),
         })
         .where(eq(tasks.id, task.id))
 
-      // Handle refund if needed (within same transaction)
-      if (finalStatus !== 'success') {
-        await handlePartialRefundInTx(
-          tx,
-          task.id,
-          taskRecord.accountId,
-          taskRecord.priceUnit,
-          taskRecord.imageNumber,
-          finalSuccessCount
-        )
-      }
+      // Handle refund based on expected vs actual image count
+      // Always check for refund (even on success, in case actual < expected)
+      await handleRefundInTx(
+        tx,
+        task.id,
+        taskRecord.accountId,
+        taskRecord.priceUnit,
+        taskRecord.expectedImageCount,
+        finalSuccessCount,
+        taskRecord.imageNumber // fallback for legacy tasks
+      )
     })
 
     logger.info(`Task ${task.id} processing completed successfully`)

@@ -57,8 +57,20 @@ export interface GenerateImagesOptions {
   templatePrompt?: string
   /** Number of images to generate */
   imageCount?: number
-  /** Image size (e.g., "1024x1024", "2048x2048", or "2k") */
+  /** Image size (e.g., "1024x1024", "2048x2048", "2K", or "4K") */
   size?: string
+  /** Sequential image generation mode */
+  sequentialImageGeneration?: 'auto' | 'disabled'
+  /** Sequential image generation options */
+  sequentialImageGenerationOptions?: {
+    maxImages?: number
+  }
+  /** Optimize prompt options */
+  optimizePromptOptions?: {
+    mode?: 'standard' | 'fast'
+  }
+  /** Whether to add watermark */
+  watermark?: boolean
   /** Timeout per image in seconds */
   timeout?: number
   /** Maximum concurrent requests */
@@ -272,12 +284,26 @@ async function generateSingleImage(
   options: {
     originalImageUrl?: string
     size: string
+    sequentialImageGeneration?: 'auto' | 'disabled'
+    sequentialImageGenerationOptions?: { maxImages?: number }
+    optimizePromptOptions?: { mode?: 'standard' | 'fast' }
+    watermark?: boolean
     timeout: number
     index: number
     rateLimiter: RateLimiter
   }
 ): Promise<GeneratedImage> {
-  const { originalImageUrl, size, timeout, index, rateLimiter } = options
+  const {
+    originalImageUrl,
+    size,
+    sequentialImageGeneration,
+    sequentialImageGenerationOptions,
+    optimizePromptOptions,
+    watermark,
+    timeout,
+    index,
+    rateLimiter,
+  } = options
   let lastError: Error | null = null
 
   for (let attempt = 1; attempt <= CONFIG.MAX_RETRIES; attempt++) {
@@ -298,14 +324,29 @@ async function generateSingleImage(
           prompt,
           response_format: 'url',
           size,
-          n: 1,
-          watermark: false,
+          watermark: watermark ?? false,
         }
 
         // Add original image for image-to-image
         if (originalImageUrl) {
           requestBody.image = [originalImageUrl]
-          requestBody.sequential_image_generation = 'auto'
+        }
+
+        // Add sequential image generation settings
+        if (sequentialImageGeneration) {
+          requestBody.sequential_image_generation = sequentialImageGeneration
+          if (sequentialImageGeneration === 'auto' && sequentialImageGenerationOptions?.maxImages) {
+            requestBody.sequential_image_generation_options = {
+              max_images: sequentialImageGenerationOptions.maxImages,
+            }
+          }
+        }
+
+        // Add optimize prompt options
+        if (optimizePromptOptions?.mode) {
+          requestBody.optimize_prompt_options = {
+            mode: optimizePromptOptions.mode,
+          }
         }
 
         // Make HTTP request with timeout
@@ -449,11 +490,16 @@ export async function generateImagesDetailed(
     originalImageUrl,
     imageCount = CONFIG.DEFAULT_IMAGE_COUNT,
     size = CONFIG.DEFAULT_SIZE,
+    sequentialImageGeneration = 'disabled',
+    sequentialImageGenerationOptions,
+    optimizePromptOptions,
+    watermark = false,
     timeout = CONFIG.TIMEOUT_SECONDS,
     concurrency = env.SEEDREAM_CONCURRENCY,
   } = options
 
   logger.info(`Starting generation: ${imageCount} images (concurrency: ${concurrency})`)
+  logger.info(`Sequential mode: ${sequentialImageGeneration}`)
 
   // Render final prompt from template
   const prompt = await renderPrompt(userPrompt, templatePrompt)
@@ -467,14 +513,20 @@ export async function generateImagesDetailed(
   )
 
   // Create generation tasks
-  const tasks = Array.from({ length: imageCount }, (_, index) => () =>
-    generateSingleImage(prompt, {
-      originalImageUrl,
-      size,
-      timeout,
-      index,
-      rateLimiter,
-    })
+  const tasks = Array.from(
+    { length: imageCount },
+    (_, index) => () =>
+      generateSingleImage(prompt, {
+        originalImageUrl,
+        size,
+        sequentialImageGeneration,
+        sequentialImageGenerationOptions,
+        optimizePromptOptions,
+        watermark,
+        timeout,
+        index,
+        rateLimiter,
+      })
   )
 
   // Execute with concurrency control
@@ -515,10 +567,7 @@ export async function generateImagesDetailed(
  * @returns Array of generated image URLs
  * @throws Error if all images fail to generate
  */
-export async function generateFromText(
-  userPrompt: string,
-  imageCount?: number
-): Promise<string[]> {
+export async function generateFromText(userPrompt: string, imageCount?: number): Promise<string[]> {
   const result = await generateImagesDetailed({
     userPrompt,
     imageCount,
