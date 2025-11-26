@@ -27,7 +27,7 @@ type Task = {
   type: string;
   status: string;
   userPrompt: string | null;
-  originalImageUrl: string | null;
+  originalImageUrls: string[];
   generatedImageUrls: string[];
   createdAt: Date;
 };
@@ -188,8 +188,9 @@ export default function TaskListPage() {
             const hasImages = task.generatedImageUrls && task.generatedImageUrls.length > 0;
             const firstImage = hasImages ? task.generatedImageUrls[0] : null;
             const imageCount = task.generatedImageUrls?.length || 0;
+            const hasOriginalImages = task.originalImageUrls && task.originalImageUrls.length > 0;
             const textToImageOverlay =
-              !hasImages && !task.originalImageUrl && task.type === 'text_to_image'
+              !hasImages && !hasOriginalImages && task.type === 'text_to_image'
                 ? getTextToImageOverlayCopy(task.status)
                 : null;
 
@@ -217,10 +218,10 @@ export default function TaskListPage() {
                         </div>
                       )}
                     </>
-                  ) : task.originalImageUrl ? (
+                  ) : hasOriginalImages ? (
                     <>
                       <Image
-                        src={task.originalImageUrl}
+                        src={task.originalImageUrls[0]}
                         alt="Original"
                         fill
                         className="object-cover opacity-50 blur-sm"

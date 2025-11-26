@@ -7,18 +7,19 @@ services:
     container_name: image-generation-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: image_generation
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${APP_DB_USER:-image_app}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
+      POSTGRES_DB: ${APP_DB_NAME:-image_generation}
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - postgres_wal:/var/lib/postgresql/data/pg_wal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h localhost"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   # Application (Next.js)
   app:
@@ -31,7 +32,7 @@ services:
       - "3000:3000"
     environment:
       # Database
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/image_generation
+      DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
 
       # Auth
       AUTH_SECRET: your-secret-key-change-in-production
@@ -75,4 +76,6 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  postgres_wal:
     driver: local

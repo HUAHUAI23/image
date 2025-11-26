@@ -1,11 +1,12 @@
 'use client'
 
+import * as React from 'react'
 import { Plus } from 'lucide-react'
 
 import { useModal } from '@/components/providers/modal-provider'
-import { Button, ButtonProps } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 
-interface CreateTaskButtonProps extends ButtonProps {
+interface CreateTaskButtonProps extends React.ComponentProps<typeof Button> {
   children?: React.ReactNode
 }
 

@@ -106,7 +106,11 @@ export const createTaskFormSchema = z
       .int()
       .min(1, '图片数量至少为 1')
       .max(500, '图片数量不能超过 500'),
-    existingImageUrl: imageUrlField.optional().transform((value) => value ?? ''),
+    // 支持多图输入：单张图片或逗号分隔的多张图片 URL
+    existingImageUrls: z
+      .string()
+      .optional()
+      .transform((value) => value ?? ''),
     hasLocalImage: z.boolean().default(false),
     // 生成选项
     generationOptions: generationOptionsSchema.optional(),
@@ -117,25 +121,10 @@ export const createTaskFormSchema = z
   })
   .refine(
     (data) =>
-      data.type !== 'image_to_image' || data.existingImageUrl.length > 0 || data.hasLocalImage,
+      data.type !== 'image_to_image' || data.existingImageUrls.length > 0 || data.hasLocalImage,
     {
       message: '图生图必须上传原始图片',
-      path: ['existingImageUrl'],
-    }
-  )
-  .refine(
-    (data) => {
-      // 如果开启组图模式且设置了 maxImages，验证 imageNumber 与 maxImages 的关系
-      const seqMode = data.generationOptions?.sequentialImageGeneration
-      const maxImages = data.generationOptions?.sequentialImageGenerationOptions?.maxImages
-      if (seqMode === 'auto' && maxImages) {
-        return data.imageNumber >= maxImages
-      }
-      return true
-    },
-    {
-      message: '开启组图模式时，批次数量应大于等于每批最大图片数',
-      path: ['imageNumber'],
+      path: ['existingImageUrls'],
     }
   )
 
@@ -155,12 +144,17 @@ export const createTaskPayloadSchema = z
       .transform((value) => value ?? ''),
     templatePromptId: z.number().int().positive().nullable(),
     imageNumber: z.number().int().min(1, '图片数量至少为 1').max(500, '图片数量不能超过 500'),
-    existingImageUrl: z.url('图片地址格式不正确').nullable(),
+    // 支持多图输入：数组形式
+    originalImageUrls: z.array(z.string().url('图片地址格式不正确')).default([]),
     generationOptions: generationOptionsSchema.optional(),
   })
   .refine((data) => data.type !== 'text_to_image' || data.userPrompt.length > 0, {
     message: '文生图必须提供提示词',
     path: ['userPrompt'],
+  })
+  .refine((data) => data.type !== 'image_to_image' || data.originalImageUrls.length > 0, {
+    message: '图生图必须提供原始图片',
+    path: ['originalImageUrls'],
   })
 
 export type CreateTaskPayload = z.infer<typeof createTaskPayloadSchema>

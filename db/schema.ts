@@ -26,8 +26,55 @@ export const taskStatusEnum = pgEnum('task_status', [
   'partial_success',
   'failed',
 ])
-export const transactionTypeEnum = pgEnum('transaction_type', ['charge', 'refund'])
 export const priceUnitEnum = pgEnum('price_unit', ['per_image', 'per_token'])
+
+// ==================== 交易系统枚举 ====================
+
+/**
+ * 交易分类
+ * - task_charge: 任务预付费（创建任务时扣费）
+ * - task_refund: 任务退款（实际生成少于预期时）
+ * - analysis_charge: 图片分析费用（VLM 分析）
+ * - recharge: 用户充值（微信、Stripe 等）
+ */
+export const transactionCategoryEnum = pgEnum('transaction_category', [
+  'task_charge',
+  'task_refund',
+  'analysis_charge',
+  'recharge',
+])
+
+/**
+ * 支付方式
+ * - balance: 余额支付（内部扣费，用于 task 和 analysis）
+ * - wechat: 微信支付
+ * - stripe: Stripe 支付
+ * - alipay: 支付宝
+ * - manual: 人工充值（管理员操作）
+ */
+export const paymentMethodEnum = pgEnum('payment_method', [
+  'balance',
+  'wechat',
+  'stripe',
+  'alipay',
+  'manual',
+])
+
+/**
+ * 充值状态（仅 category=recharge 时使用）
+ * - pending: 待支付（用户发起充值，等待支付）
+ * - processing: 处理中（支付平台回调处理中）
+ * - success: 支付成功（已到账）
+ * - failed: 支付失败
+ * - refunded: 已退款
+ */
+export const rechargeStatusEnum = pgEnum('recharge_status', [
+  'pending',
+  'processing',
+  'success',
+  'failed',
+  'refunded',
+])
 
 // ==================== 用户相关表 ====================
 
@@ -117,7 +164,10 @@ export const tasks = pgTable(
     vlmPrompt: text('vlm_prompt'),
     templatePromptId: integer('template_prompt_id').references(() => promptTemplates.id),
     userPrompt: text('user_prompt'),
-    originalImageUrl: text('original_image_url'),
+    originalImageUrls: jsonb('original_image_urls')
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`)
+      .notNull(), // 支持多图输入（单图、多图融合）
     generatedImageUrls: jsonb('generated_image_urls')
       .$type<string[]>()
       .default(sql`'[]'::jsonb`)
@@ -137,8 +187,9 @@ export const tasks = pgTable(
         }
         watermark?: boolean // 是否添加水印
       }>()
-      .default(sql`'{}'::jsonb`), // 用户指定的生成参数（可为空，兼容旧数据）
-    expectedImageCount: integer('expected_image_count'), // 预期生成的图片数量（用于预付费计算，旧数据可能为空）
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
+    expectedImageCount: integer('expected_image_count').notNull(), // 预期生成的图片数量（用于预付费计算）
     actualImageCount: integer('actual_image_count').default(0).notNull(), // 实际生成的图片数量（用于退款计算）
     errorDetails: jsonb('error_details')
       .$type<{
@@ -174,15 +225,52 @@ export const transactions = pgTable(
     accountId: integer('account_id')
       .notNull()
       .references(() => accounts.id),
-    taskId: integer('task_id').references(() => tasks.id),
+
+    // 交易分类和金额
+    category: transactionCategoryEnum('category').notNull(),
     amount: bigint('amount', { mode: 'number' }).notNull(),
-    type: transactionTypeEnum('type').notNull(),
+
+    // 余额变动
     balanceBefore: bigint('balance_before', { mode: 'number' }).notNull(),
     balanceAfter: bigint('balance_after', { mode: 'number' }).notNull(),
+
+    // 关联信息（根据 category 不同，可能为空）
+    taskId: integer('task_id').references(() => tasks.id),
+
+    // 支付信息
+    paymentMethod: paymentMethodEnum('payment_method').default('balance').notNull(),
+    externalOrderId: text('external_order_id'), // 第三方支付订单号（微信/Stripe/支付宝）
+    rechargeStatus: rechargeStatusEnum('recharge_status'), // 充值状态（仅 recharge 时有效）
+
+    // 额外信息（JSONB 存储特定类型的详情）
+    metadata: jsonb('metadata')
+      .$type<{
+        description?: string // 交易描述
+        // Task 相关
+        expectedCount?: number // 预期图片数量
+        actualCount?: number // 实际图片数量
+        refundReason?: string // 退款原因
+        // Analysis 相关
+        analysisType?: string // 'vlm', 'ocr' 等
+        imageUrl?: string // 分析的图片 URL
+        // Recharge 相关
+        paymentDetails?: {
+          platform?: string
+          platformOrderId?: string
+          paymentTime?: string
+          [key: string]: any
+        }
+      }>()
+      .default(sql`'{}'::jsonb`)
+      .notNull(),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index('transaction_account_idx').on(table.accountId),
     index('transaction_task_idx').on(table.taskId),
+    index('transaction_category_idx').on(table.category),
+    index('transaction_external_order_idx').on(table.externalOrderId),
+    index('transaction_created_at_idx').on(table.createdAt),
   ]
 )

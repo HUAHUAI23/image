@@ -39,14 +39,14 @@ export async function POST(request: NextRequest) {
   }
 
   const formData = await request.formData()
-  const file = formData.get('image') as File | null
   const typeValue = formData.get('type')
   const nameValue = formData.get('name')
   const userPromptValue = formData.get('userPrompt')
-  const existingImageUrlValue = formData.get('existingImageUrl')
+  const existingImageUrlsValue = formData.get('existingImageUrls') // 支持多图（逗号分隔的 URL 字符串）
   const templatePromptIdValue = parseTemplateId(formData.get('templateId'))
   const imageNumberValue = formData.get('imageNumber')
   const generationOptionsValue = formData.get('generationOptions')
+  const imageCountValue = formData.get('imageCount') // 上传的图片数量
 
   // 解析生成选项
   let parsedGenerationOptions: any = undefined
@@ -60,16 +60,39 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // 解析已存在的图片 URLs（支持逗号分隔的多个 URL）
+  let originalImageUrls: string[] = []
+  if (typeof existingImageUrlsValue === 'string' && existingImageUrlsValue.trim().length > 0) {
+    originalImageUrls = existingImageUrlsValue
+      .split(',')
+      .map((url) => url.trim())
+      .filter((url) => url.length > 0)
+  }
+
+  // 处理多个上传的本地文件
+  const imageCount = imageCountValue ? parseInt(imageCountValue as string, 10) : 0
+  if (imageCount > 0) {
+    try {
+      for (let i = 0; i < imageCount; i++) {
+        const file = formData.get(`image_${i}`) as File | null
+        if (file && file.size > 0) {
+          const uploadedUrl = await uploadFileToTempTOS(file, session.userId)
+          originalImageUrls.push(uploadedUrl)
+        }
+      }
+    } catch (error) {
+      logger.error(error, '文件上传失败')
+      return NextResponse.json({ success: false, message: '图片上传失败' }, { status: 500 })
+    }
+  }
+
   const normalizedPayload = {
     type: typeof typeValue === 'string' ? (typeValue as string) : undefined,
     name: typeof nameValue === 'string' ? (nameValue as string) : '',
     userPrompt: typeof userPromptValue === 'string' ? (userPromptValue as string) : undefined,
     templatePromptId: templatePromptIdValue,
     imageNumber: parseNumberField(imageNumberValue),
-    existingImageUrl:
-      typeof existingImageUrlValue === 'string' && existingImageUrlValue.trim().length > 0
-        ? existingImageUrlValue.trim()
-        : null,
+    originalImageUrls,
     generationOptions: parsedGenerationOptions,
   }
 
@@ -83,22 +106,15 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { type, name, userPrompt, templatePromptId, imageNumber, generationOptions } =
-    validation.data
-  let originalImageUrl = validation.data.existingImageUrl
-
-  if (!originalImageUrl && file && file.size > 0) {
-    try {
-      originalImageUrl = await uploadFileToTempTOS(file, session.userId)
-    } catch (error) {
-      logger.error(error, '文件上传失败')
-      return NextResponse.json({ success: false, message: '图片上传失败' }, { status: 500 })
-    }
-  }
-
-  if (type === 'image_to_image' && !originalImageUrl) {
-    return NextResponse.json({ success: false, message: '图生图必须上传原始图片' }, { status: 400 })
-  }
+  const {
+    type,
+    name,
+    userPrompt,
+    templatePromptId,
+    imageNumber,
+    originalImageUrls: validatedUrls,
+    generationOptions,
+  } = validation.data
 
   if (type === 'text_to_image' && userPrompt.length === 0) {
     return NextResponse.json({ success: false, message: '文生图必须提供提示词' }, { status: 400 })
@@ -121,14 +137,12 @@ export async function POST(request: NextRequest) {
       const pricePerImage = priceRecord.price
 
       // 计算预期生成的图片数量（用于预付费）
-      // 如果 generationOptions 为空，使用传统模式（imageNumber = expectedImageCount）
-      const expectedImageCount = generationOptions
-        ? calculateExpectedImageCount(imageNumber, generationOptions)
-        : imageNumber
+      const expectedImageCount = calculateExpectedImageCount(imageNumber, generationOptions)
       const totalCost = pricePerImage * expectedImageCount
 
+      const hasMultipleImages = validatedUrls.length > 1
       logger.info(
-        `[Task] Creating task: ${imageNumber} batches, expected ${expectedImageCount} images (${pricePerImage}/image) = ${totalCost} total`
+        `[Task] Creating task: ${imageNumber} batches, expected ${expectedImageCount} images, multi-image: ${hasMultipleImages} (${pricePerImage}/image) = ${totalCost} total`
       )
 
       const accountRecord = await tx.query.accounts.findFirst({
@@ -156,10 +170,15 @@ export async function POST(request: NextRequest) {
           status: 'pending',
           templatePromptId,
           userPrompt: userPrompt.length > 0 ? userPrompt : null,
-          originalImageUrl: originalImageUrl ?? null,
+          originalImageUrls: validatedUrls,
           imageNumber,
           priceUnit: 'per_image',
-          generationOptions: generationOptions ? generationOptions : { size: '2K' }, // 提供默认值
+          generationOptions: generationOptions || {
+            size: '2K',
+            sequentialImageGeneration: 'disabled',
+            watermark: false,
+            optimizePromptOptions: { mode: 'standard' },
+          },
           expectedImageCount,
           actualImageCount: 0,
         })
@@ -175,10 +194,15 @@ export async function POST(request: NextRequest) {
       await tx.insert(transactions).values({
         accountId: accountRecord.id,
         taskId: newTask.id,
+        category: 'task_charge',
         amount: totalCost,
-        type: 'charge',
+        paymentMethod: 'balance',
         balanceBefore: accountRecord.balance,
         balanceAfter: newBalance,
+        metadata: {
+          description: `任务 ${name} 预付费`,
+          expectedCount: expectedImageCount,
+        },
       })
 
       logger.info(
