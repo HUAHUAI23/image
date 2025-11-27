@@ -139,17 +139,17 @@ function BalanceCard({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="md:col-span-1 rounded-2xl bg-gradient-to-br from-primary to-primary/90 p-6 text-primary-foreground shadow-lg relative overflow-hidden group flex flex-col justify-between"
+      className="md:col-span-1 rounded-2xl bg-[#1A1F2E] p-6 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between h-[180px]"
     >
-      <div className="absolute right-0 top-0 p-6 opacity-10 group-hover:opacity-20 transition-all duration-500 scale-150">
-        <Wallet className="w-24 h-24" />
+      <div className="absolute right-[-20px] top-[-20px] opacity-[0.03] group-hover:opacity-[0.06] transition-all duration-500 rotate-12">
+        <Wallet className="w-48 h-48" />
       </div>
 
       <div className="relative z-10">
-        <p className="text-primary-foreground/80 text-sm font-medium mb-1">当前余额</p>
+        <p className="text-gray-400 text-xs font-medium mb-2 uppercase tracking-wider">当前余额</p>
         <AnimatePresence mode="wait">
           {isLoading && !balance ? (
-            <Skeleton className="h-9 w-32 bg-primary-foreground/20" />
+            <Skeleton className="h-10 w-32 bg-white/10" />
           ) : (
             <motion.h2
               key={balance}
@@ -157,7 +157,7 @@ function BalanceCard({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
               transition={{ duration: 0.3 }}
-              className="text-3xl font-bold tracking-tight"
+              className="text-4xl font-bold tracking-tight text-white"
             >
               {formatCurrency(balance)}
             </motion.h2>
@@ -165,9 +165,19 @@ function BalanceCard({
         </AnimatePresence>
       </div>
 
-      {/* 充值方式图标列 */}
-      <div className="relative z-10 mt-6">
-        <RechargeMethods configs={paymentConfigs} onSelect={onSelectPayment} />
+      <div className="relative z-10 mt-auto flex items-center gap-3">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              className="w-full bg-white text-black hover:bg-gray-100 font-semibold h-10 rounded-lg transition-all active:scale-95"
+            >
+              立即充值
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0 border-none shadow-xl" align="start" sideOffset={10}>
+            <RechargeMethods configs={paymentConfigs} onSelect={onSelectPayment} />
+          </PopoverContent>
+        </Popover>
       </div>
     </motion.div>
   )
@@ -180,7 +190,6 @@ function StatCard({
   description,
   icon: Icon,
   iconColor,
-  bgColor,
   borderColor,
   isLoading,
   delay = 0
@@ -190,7 +199,6 @@ function StatCard({
   description: string
   icon: React.ElementType
   iconColor: string
-  bgColor: string
   borderColor: string
   isLoading: boolean
   delay?: number
@@ -201,23 +209,20 @@ function StatCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay }}
       className={cn(
-        'rounded-2xl border p-5 flex flex-col justify-between transition-colors',
-        bgColor,
+        'rounded-2xl border bg-card p-6 flex flex-col justify-between shadow-sm h-[180px] hover:shadow-md transition-all duration-300',
         borderColor
       )}
     >
       <div className="flex items-start justify-between">
-        <div className={cn('p-2 rounded-lg', iconColor)}>
-          <Icon className="w-5 h-5" />
+        <span className="text-sm font-medium text-muted-foreground">{title}</span>
+        <div className={cn('p-2 rounded-lg bg-opacity-10', iconColor.replace('text-', 'bg-').replace('500', '500/10').replace('600', '500/10'))}>
+          <Icon className={cn("w-4 h-4", iconColor.split(' ')[1])} />
         </div>
-        <Badge variant="outline" className="text-xs font-normal text-muted-foreground bg-white/50 dark:bg-transparent">
-          {title}
-        </Badge>
       </div>
       <div>
         <AnimatePresence mode="wait">
           {isLoading ? (
-            <Skeleton className="h-8 w-24 mb-1" />
+            <Skeleton className="h-8 w-24 mb-2" />
           ) : (
             <motion.div
               key={amount}
@@ -225,13 +230,13 @@ function StatCard({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
               transition={{ duration: 0.3 }}
-              className="text-2xl font-bold text-foreground"
+              className="text-3xl font-bold text-foreground tracking-tight"
             >
               {formatCurrency(amount)}
             </motion.div>
           )}
         </AnimatePresence>
-        <p className="text-xs text-muted-foreground mt-1">{description}</p>
+        <p className="text-xs text-muted-foreground mt-2">{description}</p>
       </div>
     </motion.div>
   )
@@ -253,13 +258,15 @@ function TrendChart({
       className="rounded-2xl border bg-card p-6 shadow-sm"
     >
       <div className="flex items-center justify-between mb-6">
-        <h3 className="font-semibold flex items-center gap-2">
-          <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
-          收支趋势
-        </h3>
+        <div className="space-y-1">
+          <h3 className="font-semibold text-base flex items-center gap-2">
+            <div className="w-1 h-4 bg-primary rounded-full" />
+            收支趋势
+          </h3>
+        </div>
       </div>
 
-      <div className="h-[250px] w-full">
+      <div className="h-[300px] w-full">
         <AnimatePresence mode="wait">
           {isLoading ? (
             <motion.div
@@ -281,13 +288,19 @@ function TrendChart({
               className="h-full w-full"
             >
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.4} />
+                <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorConsumption" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.3} />
                   <XAxis
                     dataKey="date"
                     tickLine={false}
                     axisLine={false}
-                    tickMargin={10}
+                    tickMargin={15}
                     fontSize={12}
                     tickFormatter={(value) => {
                       const date = new Date(value)
@@ -298,7 +311,7 @@ function TrendChart({
                   <YAxis
                     tickLine={false}
                     axisLine={false}
-                    tickMargin={10}
+                    tickMargin={15}
                     fontSize={12}
                     tickFormatter={(value) => `¥${value}`}
                     stroke="hsl(var(--muted-foreground))"
@@ -307,30 +320,33 @@ function TrendChart({
                     contentStyle={{
                       backgroundColor: 'hsl(var(--popover))',
                       borderColor: 'hsl(var(--border))',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                      borderRadius: '12px',
+                      boxShadow: '0 8px 20px rgba(0,0,0,0.1)',
+                      padding: '12px'
                     }}
-                    itemStyle={{ fontSize: '12px' }}
-                    labelStyle={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))', marginBottom: '4px' }}
+                    itemStyle={{ fontSize: '12px', fontWeight: 500 }}
+                    labelStyle={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))', marginBottom: '8px' }}
                     labelFormatter={(value) => new Date(value).toLocaleDateString()}
+                    cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
                   />
                   <Line
                     name="消费"
                     type="monotone"
                     dataKey="consumption"
                     stroke="hsl(var(--primary))"
-                    strokeWidth={2}
-                    dot={{ r: 3, strokeWidth: 2, fill: 'hsl(var(--background))' }}
-                    activeDot={{ r: 5, strokeWidth: 2 }}
+                    strokeWidth={3}
+                    dot={false}
+                    activeDot={{ r: 6, strokeWidth: 0, fill: 'hsl(var(--primary))' }}
+                    fill="url(#colorConsumption)"
                   />
                   <Line
                     name="充值"
                     type="monotone"
                     dataKey="recharge"
                     stroke="#10b981"
-                    strokeWidth={2}
-                    dot={{ r: 3, strokeWidth: 2, fill: 'hsl(var(--background))' }}
-                    activeDot={{ r: 5, strokeWidth: 2 }}
+                    strokeWidth={3}
+                    dot={false}
+                    activeDot={{ r: 6, strokeWidth: 0, fill: '#10b981' }}
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -645,7 +661,7 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                   className="h-full overflow-y-auto p-6 space-y-6 absolute inset-0"
                 >
                   {/* Balance and Stats Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <BalanceCard
                       balance={balance}
                       isLoading={isLoading}
@@ -653,30 +669,26 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                       onSelectPayment={handleSelectPayment}
                     />
 
-                    <div className="md:col-span-2 grid grid-cols-2 gap-4">
-                      <StatCard
-                        title="本期支出"
-                        amount={summary.totalConsumption}
-                        description="用于任务生成与分析"
-                        icon={TrendingDown}
-                        iconColor="bg-orange-500/10 text-orange-600"
-                        bgColor="bg-orange-50/50 dark:bg-orange-950/10"
-                        borderColor="hover:border-orange-200/50 dark:hover:border-orange-800/50"
-                        isLoading={isLoading}
-                        delay={0.1}
-                      />
-                      <StatCard
-                        title="本期充值"
-                        amount={summary.totalRecharge}
-                        description="账户资金充入"
-                        icon={TrendingUp}
-                        iconColor="bg-emerald-500/10 text-emerald-600"
-                        bgColor="bg-emerald-50/50 dark:bg-emerald-950/10"
-                        borderColor="hover:border-emerald-200/50 dark:hover:border-emerald-800/50"
-                        isLoading={isLoading}
-                        delay={0.15}
-                      />
-                    </div>
+                    <StatCard
+                      title="本期支出"
+                      amount={summary.totalConsumption}
+                      description="用于任务生成与分析"
+                      icon={TrendingDown}
+                      iconColor="text-orange-500"
+                      borderColor="border-border"
+                      isLoading={isLoading}
+                      delay={0.1}
+                    />
+                    <StatCard
+                      title="本期充值"
+                      amount={summary.totalRecharge}
+                      description="账户资金充入"
+                      icon={TrendingUp}
+                      iconColor="text-emerald-500"
+                      borderColor="border-border"
+                      isLoading={isLoading}
+                      delay={0.15}
+                    />
                   </div>
 
                   {/* Trend Chart */}
