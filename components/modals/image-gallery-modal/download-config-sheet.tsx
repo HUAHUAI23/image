@@ -1,4 +1,4 @@
-'use client';
+'use client'
 
 import {
   Archive,
@@ -8,30 +8,30 @@ import {
   Maximize,
   RefreshCcw,
   Settings2,
-} from 'lucide-react';
+} from 'lucide-react'
 
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from '@/components/ui/sheet';
-import { Slider } from '@/components/ui/slider';
-import { buildProcessQuery, ImageProcessConfig } from '@/lib/image-process';
-import { cn } from '@/lib/utils';
+} from '@/components/animate-ui/components/radix/sheet'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Slider } from '@/components/ui/slider'
+import { buildProcessQuery, ImageProcessConfig } from '@/lib/image-process'
+import { cn } from '@/lib/utils'
 
 // 缩放模式配置
 const RESIZE_MODES = [
@@ -61,24 +61,24 @@ const RESIZE_MODES = [
     label: '强制缩放 (fixed)',
     description: '强制按指定宽高缩放，不保持原图比例',
   },
-] as const;
+] as const
 
 // 输出格式配置
 const OUTPUT_FORMATS = [
   { value: 'none', label: '原图', description: '保持原始格式' },
   { value: 'webp', label: 'WebP', description: '现代格式，体积更小' },
   { value: 'jpg', label: 'JPG', description: '兼容性最好' },
-] as const;
+] as const
 
 interface DownloadConfigSheetProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  config: ImageProcessConfig;
-  onConfigChange: (config: ImageProcessConfig) => void;
-  selectedCount: number;
-  downloading: boolean;
-  onDownload: () => void;
-  onReset: () => void;
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  config: ImageProcessConfig
+  onConfigChange: (config: ImageProcessConfig) => void
+  selectedCount: number
+  downloading: boolean
+  onDownload: () => void
+  onReset: () => void
 }
 
 export function DownloadConfigSheet({
@@ -92,12 +92,16 @@ export function DownloadConfigSheet({
   onReset,
 }: DownloadConfigSheetProps) {
   const updateConfig = (updates: Partial<ImageProcessConfig>) => {
-    onConfigChange({ ...config, ...updates });
-  };
+    onConfigChange({ ...config, ...updates })
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-md p-0 flex flex-col h-full max-h-dvh bg-background shadow-2xl border-l border-border outline-none">
+      <SheetContent
+        side="right"
+        showCloseButton={true}
+        className="w-full sm:max-w-md p-0 flex flex-col h-full max-h-dvh bg-background shadow-2xl border-l border-border outline-none"
+      >
         <SheetHeader className="px-6 py-5 border-b border-border/50 bg-muted/30 shrink-0 flex-none">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
@@ -450,5 +454,5 @@ export function DownloadConfigSheet({
         </div>
       </SheetContent>
     </Sheet>
-  );
+  )
 }

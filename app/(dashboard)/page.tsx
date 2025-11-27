@@ -1,50 +1,53 @@
-'use client';
+'use client'
 
-import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Clock, ImageIcon } from 'lucide-react';
-import Image from 'next/image';
+import { useCallback, useEffect, useState } from 'react'
+import { AlertCircle, CheckCircle2, Clock, ImageIcon } from 'lucide-react'
+import Image from 'next/image'
 
-import { getTasksAction } from '@/app/actions/task';
-import { CreateTaskButton } from '@/components/create-task-button';
-import { ImageGalleryModal } from '@/components/modals/image-gallery-modal';
-import { useModal } from '@/components/providers/modal-provider';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { SidebarTrigger } from '@/components/ui/sidebar';
+import { getTasksAction } from '@/app/actions/task'
+import { CreateTaskButton } from '@/components/create-task-button'
+import { ImageGalleryModal } from '@/components/modals/image-gallery-modal'
+import { useModal } from '@/components/providers/modal-provider'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { SidebarTrigger } from '@/components/ui/sidebar'
 
 // Constants
-const POLLING_INTERVAL = 5000; // 5 seconds
+const POLLING_INTERVAL = 5000 // 5 seconds
 const IMAGE_SIZES = {
   MOBILE: '100vw',
   TABLET: '50vw',
   DESKTOP_MD: '33vw',
   DESKTOP_LG: '25vw',
-} as const;
+} as const
 
 type Task = {
-  id: number;
-  name: string;
-  type: string;
-  status: string;
-  userPrompt: string | null;
-  originalImageUrls: string[];
-  generatedImageUrls: string[];
-  createdAt: Date;
-};
+  id: number
+  name: string
+  type: string
+  status: string
+  userPrompt: string | null
+  originalImageUrls: string[]
+  generatedImageUrls: string[]
+  createdAt: Date
+}
 
 export default function TaskListPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const { setOnTaskSuccess } = useModal();
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([])
+  const { setOnTaskSuccess } = useModal()
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false)
+  const [triggerRect, setTriggerRect] = useState<DOMRect | null>(null)
 
   // Handle opening gallery
-  const handleOpenGallery = useCallback((task: Task) => {
+  const handleOpenGallery = useCallback((task: Task, event: React.MouseEvent<HTMLDivElement>) => {
     if (task.generatedImageUrls && task.generatedImageUrls.length > 0) {
-      setSelectedTask(task);
-      setIsGalleryOpen(true);
+      const rect = event.currentTarget.getBoundingClientRect()
+      setTriggerRect(rect)
+      setSelectedTask(task)
+      setIsGalleryOpen(true)
     }
-  }, []);
+  }, [])
 
   const getTextToImageOverlayCopy = useCallback((status: Task['status']) => {
     switch (status) {
@@ -52,55 +55,55 @@ export default function TaskListPage() {
         return {
           label: '等待处理',
           description: 'AI 正在准备生成您的作品',
-        };
+        }
       case 'processing':
         return {
           label: '生成中...',
           description: 'AI 正在根据提示词创作',
-        };
+        }
       case 'failed':
         return {
           label: '生成失败',
           description: '请调整提示词后重试',
-        };
+        }
       default:
-        return null;
+        return null
     }
-  }, []);
+  }, [])
 
   // Initial load and polling setup
   useEffect(() => {
-    let isMounted = true;
+    let isMounted = true
 
     const fetchTasks = async () => {
-      const result = await getTasksAction();
+      const result = await getTasksAction()
       if (isMounted) {
-        setTasks(result);
+        setTasks(result)
       }
-    };
+    }
 
     // Initial load
-    fetchTasks();
+    fetchTasks()
 
     // Setup polling for task status updates
-    const interval = setInterval(fetchTasks, POLLING_INTERVAL);
+    const interval = setInterval(fetchTasks, POLLING_INTERVAL)
 
     return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []);
+      isMounted = false
+      clearInterval(interval)
+    }
+  }, [])
 
   // Setup refresh callback on task success
   useEffect(() => {
     const refreshTasks = async () => {
-      const result = await getTasksAction();
-      setTasks(result);
-    };
+      const result = await getTasksAction()
+      setTasks(result)
+    }
 
-    setOnTaskSuccess(() => refreshTasks);
-    return () => setOnTaskSuccess(undefined);
-  }, [setOnTaskSuccess]);
+    setOnTaskSuccess(() => refreshTasks)
+    return () => setOnTaskSuccess(undefined)
+  }, [setOnTaskSuccess])
 
   if (tasks.length === 0) {
     return (
@@ -165,7 +168,7 @@ export default function TaskListPage() {
           </div>
         </div>
       </div>
-    );
+    )
   }
 
   return (
@@ -185,20 +188,20 @@ export default function TaskListPage() {
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {tasks.map((task) => {
-            const hasImages = task.generatedImageUrls && task.generatedImageUrls.length > 0;
-            const firstImage = hasImages ? task.generatedImageUrls[0] : null;
-            const imageCount = task.generatedImageUrls?.length || 0;
-            const hasOriginalImages = task.originalImageUrls && task.originalImageUrls.length > 0;
+            const hasImages = task.generatedImageUrls && task.generatedImageUrls.length > 0
+            const firstImage = hasImages ? task.generatedImageUrls[0] : null
+            const imageCount = task.generatedImageUrls?.length || 0
+            const hasOriginalImages = task.originalImageUrls && task.originalImageUrls.length > 0
             const textToImageOverlay =
               !hasImages && !hasOriginalImages && task.type === 'text_to_image'
                 ? getTextToImageOverlayCopy(task.status)
-                : null;
+                : null
 
             return (
               <Card key={task.id} className="group overflow-hidden transition-all hover:shadow-md">
                 <div
                   className="aspect-square relative bg-muted overflow-hidden cursor-pointer"
-                  onClick={() => handleOpenGallery(task)}
+                  onClick={(e) => handleOpenGallery(task, e)}
                 >
                   {hasImages ? (
                     <>
@@ -206,7 +209,7 @@ export default function TaskListPage() {
                         src={firstImage!}
                         alt={`Generated`}
                         fill
-                        className="object-cover transition-transform duration-300 group-hover:scale-105"
+                        className="object-cover transition-transform duration-400 ease-out group-hover:scale-110"
                         sizes={`(max-width: 768px) ${IMAGE_SIZES.MOBILE}, (max-width: 1024px) ${IMAGE_SIZES.TABLET}, (max-width: 1280px) ${IMAGE_SIZES.DESKTOP_MD}, ${IMAGE_SIZES.DESKTOP_LG}`}
                         priority={task.id === tasks[0]?.id}
                       />
@@ -283,7 +286,7 @@ export default function TaskListPage() {
 
                   {/* Hover overlay to view all images */}
                   {hasImages && (
-                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 flex items-center justify-center">
+                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 ease-out bg-black/40 flex items-center justify-center">
                       <div className="text-white text-sm font-medium">
                         {imageCount > 1 ? `查看全部 ${imageCount} 张` : '查看图片'}
                       </div>
@@ -311,7 +314,7 @@ export default function TaskListPage() {
                   {new Date(task.createdAt).toLocaleString()}
                 </CardFooter>
               </Card>
-            );
+            )
           })}
         </div>
 
@@ -323,9 +326,10 @@ export default function TaskListPage() {
             images={selectedTask.generatedImageUrls}
             taskName={selectedTask.name}
             taskId={selectedTask.id}
+            triggerRect={triggerRect}
           />
         )}
       </div>
     </div>
-  );
+  )
 }
