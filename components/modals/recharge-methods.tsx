@@ -1,6 +1,15 @@
 'use client'
 
 import { type PaymentConfigPublic } from '@/app/actions/payment-configs'
+import {
+  AvatarGroup,
+  AvatarGroupTooltip,
+} from '@/components/animate-ui/components/animate/avatar-group'
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from '@/components/ui/avatar'
 
 
 interface RechargeMethodsProps {
@@ -19,43 +28,39 @@ export function RechargeMethods({ configs, onSelect }: RechargeMethodsProps) {
   if (!configs.length) return null
 
   return (
-    <div className="grid gap-1 min-w-[240px] p-1">
-      <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground mb-1">
-        选择充值方式
-      </div>
-      {configs.map((config) => {
-        const icon = config.icon || DEFAULT_ICONS[config.provider]
-        const isUrlIcon = icon?.startsWith('http://') || icon?.startsWith('https://')
+    <div className="flex items-center">
+      <AvatarGroup className="gap-2" invertOverlap={false}>
+        {configs.map((config) => {
+          const icon = config.icon || DEFAULT_ICONS[config.provider]
+          const isUrlIcon = icon?.startsWith('http://') || icon?.startsWith('https://')
 
-        return (
-          <button
-            key={config.provider}
-            onClick={() => onSelect(config.provider as any, config)}
-            className="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium hover:bg-accent transition-all duration-200 border border-transparent hover:border-border"
-          >
-            <div className="flex h-9 w-9 items-center justify-center rounded-md bg-muted/50 border shadow-sm group-hover:bg-background transition-colors">
+          return (
+            <Avatar
+              key={config.provider}
+              className="h-10 w-10 cursor-pointer border-2 border-white/10 transition-transform hover:scale-110 hover:z-10"
+              onClick={() => onSelect(config.provider as any, config)}
+            >
               {isUrlIcon ? (
-                <img
+                <AvatarImage
                   src={icon}
                   alt={config.displayName}
-                  className="h-5 w-5 object-contain"
+                  className="object-contain p-1.5"
                 />
               ) : (
-                <span className="text-lg">{icon}</span>
+                <div className="flex h-full w-full items-center justify-center bg-muted/20">
+                  <span className="text-lg">{icon}</span>
+                </div>
               )}
-            </div>
-            <div className="flex-1 text-left">
-              <div className="text-foreground">{config.displayName}</div>
-              <div className="text-[10px] text-muted-foreground font-normal">
-                支持自动到账
-              </div>
-            </div>
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground">
-              →
-            </div>
-          </button>
-        )
-      })}
+              <AvatarFallback className="bg-muted/20 text-[10px]">
+                {config.displayName.slice(0, 2)}
+              </AvatarFallback>
+              <AvatarGroupTooltip>
+                {config.displayName}
+              </AvatarGroupTooltip>
+            </Avatar>
+          )
+        })}
+      </AvatarGroup>
     </div>
   )
 }

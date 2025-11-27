@@ -145,39 +145,30 @@ function BalanceCard({
         <Wallet className="w-48 h-48" />
       </div>
 
-      <div className="relative z-10">
-        <p className="text-gray-400 text-xs font-medium mb-2 uppercase tracking-wider">当前余额</p>
-        <AnimatePresence mode="wait">
-          {isLoading && !balance ? (
-            <Skeleton className="h-10 w-32 bg-white/10" />
-          ) : (
-            <motion.h2
-              key={balance}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ duration: 0.3 }}
-              className="text-4xl font-bold tracking-tight text-white"
-            >
-              {formatCurrency(balance)}
-            </motion.h2>
-          )}
-        </AnimatePresence>
-      </div>
+      <div className="relative z-10 flex flex-col justify-center h-full gap-6">
+        <div>
+          <p className="text-gray-400 text-xs font-medium mb-2 uppercase tracking-wider">当前余额</p>
+          <AnimatePresence mode="wait">
+            {isLoading && !balance ? (
+              <Skeleton className="h-10 w-32 bg-white/10" />
+            ) : (
+              <motion.h2
+                key={balance}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.3 }}
+                className="text-4xl font-bold tracking-tight text-white"
+              >
+                {formatCurrency(balance)}
+              </motion.h2>
+            )}
+          </AnimatePresence>
+        </div>
 
-      <div className="relative z-10 mt-auto flex items-center gap-3">
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              className="w-full bg-white text-black hover:bg-gray-100 font-semibold h-10 rounded-lg transition-all active:scale-95"
-            >
-              立即充值
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0 border-none shadow-xl" align="start" sideOffset={10}>
-            <RechargeMethods configs={paymentConfigs} onSelect={onSelectPayment} />
-          </PopoverContent>
-        </Popover>
+        <div>
+          <RechargeMethods configs={paymentConfigs} onSelect={onSelectPayment} />
+        </div>
       </div>
     </motion.div>
   )
