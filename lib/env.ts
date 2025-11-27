@@ -32,12 +32,39 @@ export const env = createEnv({
     // Queue Configuration
     QUEUE_CONCURRENCY: z.coerce.number().min(1).max(100).default(5),
 
-    // Cron Configuration
-    CRON_BATCH_SIZE: z.coerce.number().min(1).max(100).default(10),
-    TASK_TIMEOUT_MINUTES: z.coerce.number().min(1).max(1440).default(30),
+    // Task Enqueue Cron (polls pending tasks and adds to queue)
+    CRON_TASK_ENQUEUE_ENABLED: z.coerce.boolean().default(true),
+    CRON_TASK_ENQUEUE_INTERVAL: z.string().default('*/5 * * * * *'), // Every 5 seconds
+    CRON_TASK_ENQUEUE_BATCH_SIZE: z.coerce.number().min(1).max(100).default(20),
+
+    // Task Timeout Recovery Cron (resets stuck tasks)
+    CRON_TASK_TIMEOUT_ENABLED: z.coerce.boolean().default(true),
+    CRON_TASK_TIMEOUT_INTERVAL: z.string().default('*/30 * * * * *'), // Every 30 seconds
+    CRON_TASK_TIMEOUT_MINUTES: z.coerce.number().min(1).max(1440).default(10),
+
+    // Order Close Cron (closes expired payment orders)
+    CRON_ORDER_CLOSE_ENABLED: z.coerce.boolean().default(true),
+    CRON_ORDER_CLOSE_INTERVAL: z.string().default('0 * * * * *'), // Every 1 minute
+    CRON_ORDER_CLOSE_BATCH_SIZE: z.coerce.number().min(1).max(100).default(50),
 
     GIFT_AMOUNT: z.coerce.number().default(0),
     ANALYSIS_PRICE: z.coerce.number().default(0),
+
+    // WeChat Pay Configuration (敏感信息) - 可选，不配置则微信支付功能不可用
+    WECHAT_PAY_APPID: z.string().min(1).optional(),
+    WECHAT_PAY_MCHID: z.string().min(1).optional(),
+    WECHAT_PAY_API_V3_KEY: z.string().min(32).optional(), // APIv3密钥，32字节
+    WECHAT_PAY_SERIAL_NO: z.string().min(1).optional(), // 商户证书序列号
+    WECHAT_PAY_PRIVATE_KEY: z.string().min(1).optional(), // 商户私钥 (PEM格式)
+    WECHAT_PAY_NOTIFY_URL: z.string().url().optional(), // 支付回调通知地址
+    WECHAT_PAY_PLATFORM_CERT: z.string().optional(), // 微信支付平台证书（可选，首次自动下载）
+    WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: z.string().optional(), // 微信支付平台证书序列号
+
+    // Alipay Configuration (敏感信息) - 可选，不配置则支付宝支付功能不可用
+    ALIPAY_APPID: z.string().min(1).optional(), // 支付宝应用ID
+    ALIPAY_PRIVATE_KEY: z.string().min(1).optional(), // 应用私钥 (PKCS1/PKCS8格式)
+    ALIPAY_PUBLIC_KEY: z.string().min(1).optional(), // 支付宝公钥 (非应用公钥)
+    ALIPAY_NOTIFY_URL: z.string().url().optional(), // 支付回调通知地址
   },
   /*
    * Environment variables available on the client (and server).
@@ -80,12 +107,39 @@ export const env = createEnv({
     // Queue
     QUEUE_CONCURRENCY: process.env.QUEUE_CONCURRENCY,
 
-    // Cron
-    CRON_BATCH_SIZE: process.env.CRON_BATCH_SIZE,
-    TASK_TIMEOUT_MINUTES: process.env.TASK_TIMEOUT_MINUTES,
+    // Task Enqueue Cron
+    CRON_TASK_ENQUEUE_ENABLED: process.env.CRON_TASK_ENQUEUE_ENABLED,
+    CRON_TASK_ENQUEUE_INTERVAL: process.env.CRON_TASK_ENQUEUE_INTERVAL,
+    CRON_TASK_ENQUEUE_BATCH_SIZE: process.env.CRON_TASK_ENQUEUE_BATCH_SIZE,
+
+    // Task Timeout Recovery Cron
+    CRON_TASK_TIMEOUT_ENABLED: process.env.CRON_TASK_TIMEOUT_ENABLED,
+    CRON_TASK_TIMEOUT_INTERVAL: process.env.CRON_TASK_TIMEOUT_INTERVAL,
+    CRON_TASK_TIMEOUT_MINUTES: process.env.CRON_TASK_TIMEOUT_MINUTES,
+
+    // Order Close Cron
+    CRON_ORDER_CLOSE_ENABLED: process.env.CRON_ORDER_CLOSE_ENABLED,
+    CRON_ORDER_CLOSE_INTERVAL: process.env.CRON_ORDER_CLOSE_INTERVAL,
+    CRON_ORDER_CLOSE_BATCH_SIZE: process.env.CRON_ORDER_CLOSE_BATCH_SIZE,
 
     GIFT_AMOUNT: process.env.GIFT_AMOUNT,
     ANALYSIS_PRICE: process.env.ANALYSIS_PRICE,
+
+    // WeChat Pay
+    WECHAT_PAY_APPID: process.env.WECHAT_PAY_APPID,
+    WECHAT_PAY_MCHID: process.env.WECHAT_PAY_MCHID,
+    WECHAT_PAY_API_V3_KEY: process.env.WECHAT_PAY_API_V3_KEY,
+    WECHAT_PAY_SERIAL_NO: process.env.WECHAT_PAY_SERIAL_NO,
+    WECHAT_PAY_PRIVATE_KEY: process.env.WECHAT_PAY_PRIVATE_KEY,
+    WECHAT_PAY_NOTIFY_URL: process.env.WECHAT_PAY_NOTIFY_URL,
+    WECHAT_PAY_PLATFORM_CERT: process.env.WECHAT_PAY_PLATFORM_CERT,
+    WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: process.env.WECHAT_PAY_PLATFORM_CERT_SERIAL_NO,
+
+    // Alipay
+    ALIPAY_APPID: process.env.ALIPAY_APPID,
+    ALIPAY_PRIVATE_KEY: process.env.ALIPAY_PRIVATE_KEY,
+    ALIPAY_PUBLIC_KEY: process.env.ALIPAY_PUBLIC_KEY,
+    ALIPAY_NOTIFY_URL: process.env.ALIPAY_NOTIFY_URL,
   },
   /*
    * Skip validation during build time (e.g., in CI/CD)

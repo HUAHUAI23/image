@@ -81,8 +81,6 @@ export type GenerationOptions = z.infer<typeof generationOptionsSchema>
 
 export const taskTypeEnum = z.enum(['text_to_image', 'image_to_image'])
 
-const imageUrlField = z.union([z.literal(''), z.string().url('图片地址格式不正确')])
-
 // ==================== 前端表单验证 ====================
 
 export const createTaskFormSchema = z

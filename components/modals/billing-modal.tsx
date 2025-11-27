@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { type DateRange } from 'react-day-picker'
-import { zhCN } from 'date-fns/locale'
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -11,13 +10,13 @@ import {
   History,
   LayoutDashboard,
   Loader2,
-  Plus,
   TrendingDown,
   TrendingUp,
   Wallet,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
+import { toast } from 'sonner'
 
 import {
   type AnalysisDataPoint,
@@ -28,6 +27,7 @@ import {
   getRechargeAnalysisAction,
   getTransactionsAction,
 } from '@/app/actions/billing'
+import { getEnabledPaymentConfigs, type PaymentConfigPublic } from '@/app/actions/payment-configs'
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { fenToYuan, formatCurrency } from '@/lib/const'
 import { cn } from '@/lib/utils'
 
+import { AlipayModal } from './alipay-modal'
+import { RechargeMethods } from './recharge-methods'
+import { WeChatPayModal } from './wechat-pay-modal'
+
 /** ===== 类型定义 ===== */
 
 interface Transaction {
@@ -51,7 +55,6 @@ interface Transaction {
   balanceAfter: number
   taskId: number | null
   paymentMethod?: string
-  rechargeStatus?: string
   metadata?: {
     description?: string
     expectedCount?: number
@@ -115,50 +118,56 @@ function getCategoryInfo(category: Transaction['category']): CategoryInfo {
   return categoryMap[category]
 }
 
+
+
 /** ===== 子组件 ===== */
 
 // 余额卡片组件
-function BalanceCard({ balance, isLoading }: { balance: number; isLoading: boolean }) {
+function BalanceCard({
+  balance,
+  isLoading,
+  paymentConfigs,
+  onSelectPayment
+}: {
+  balance: number
+  isLoading: boolean
+  paymentConfigs: PaymentConfigPublic[]
+  onSelectPayment: (provider: 'wechat' | 'alipay' | 'stripe', config: PaymentConfigPublic) => void
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className="md:col-span-1 rounded-2xl bg-gradient-to-br from-primary to-primary/90 p-6 text-primary-foreground shadow-lg relative overflow-hidden group"
+      className="md:col-span-1 rounded-2xl bg-gradient-to-br from-primary to-primary/90 p-6 text-primary-foreground shadow-lg relative overflow-hidden group flex flex-col justify-between"
     >
       <div className="absolute right-0 top-0 p-6 opacity-10 group-hover:opacity-20 transition-all duration-500 scale-150">
         <Wallet className="w-24 h-24" />
       </div>
-      <div className="relative z-10 flex flex-col h-full justify-between">
-        <div>
-          <p className="text-primary-foreground/80 text-sm font-medium mb-1">当前余额</p>
-          <AnimatePresence mode="wait">
-            {isLoading && !balance ? (
-              <Skeleton className="h-9 w-32 bg-primary-foreground/20" />
-            ) : (
-              <motion.h2
-                key={balance}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ duration: 0.3 }}
-                className="text-3xl font-bold tracking-tight"
-              >
-                {formatCurrency(balance)}
-              </motion.h2>
-            )}
-          </AnimatePresence>
-        </div>
-        <div className="mt-6">
-          <Button
-            size="sm"
-            variant="secondary"
-            className="w-full bg-white/10 hover:bg-white/20 text-white border-0 backdrop-blur-sm shadow-none justify-between group/btn"
-          >
-            <span>立即充值</span>
-            <Plus className="w-4 h-4 ml-2 opacity-70 group-hover/btn:opacity-100 transition-opacity" />
-          </Button>
-        </div>
+
+      <div className="relative z-10">
+        <p className="text-primary-foreground/80 text-sm font-medium mb-1">当前余额</p>
+        <AnimatePresence mode="wait">
+          {isLoading && !balance ? (
+            <Skeleton className="h-9 w-32 bg-primary-foreground/20" />
+          ) : (
+            <motion.h2
+              key={balance}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.3 }}
+              className="text-3xl font-bold tracking-tight"
+            >
+              {formatCurrency(balance)}
+            </motion.h2>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* 充值方式图标列 */}
+      <div className="relative z-10 mt-6">
+        <RechargeMethods configs={paymentConfigs} onSelect={onSelectPayment} />
       </div>
     </motion.div>
   )
@@ -294,7 +303,7 @@ function TrendChart({
                     tickFormatter={(value) => `¥${value}`}
                     stroke="hsl(var(--muted-foreground))"
                   />
-                  <Tooltip
+                  <RechartsTooltip
                     contentStyle={{
                       backgroundColor: 'hsl(var(--popover))',
                       borderColor: 'hsl(var(--border))',
@@ -413,6 +422,10 @@ function TransactionRow({ transaction: tx, detailed = false }: { transaction: Tr
 
 export function BillingModal({ open, onOpenChange }: BillingModalProps) {
   const [activeTab, setActiveTab] = useState('overview')
+  const [wechatPayOpen, setWechatPayOpen] = useState(false)
+  const [alipayOpen, setAlipayOpen] = useState(false)
+  const [selectedPaymentConfig, setSelectedPaymentConfig] = useState<any>(null)
+  const [paymentConfigs, setPaymentConfigs] = useState<PaymentConfigPublic[]>([])
   const [data, setData] = useState<BillingData>({
     balance: 0,
     summary: { totalConsumption: 0, totalRecharge: 0 },
@@ -432,40 +445,61 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
   const { balance, summary, transactions, consumptionData, rechargeData, isLoading } = data
 
   // 数据获取
+  const fetchData = useCallback(async () => {
+    setData((prev) => ({ ...prev, isLoading: true }))
+
+    try {
+      const startDate = dateRange?.from?.toISOString()
+      const endDate = dateRange?.to?.toISOString()
+
+      const [bal, sum, txs, consumption, recharge, configs] = await Promise.all([
+        getBalanceAction(),
+        getBillingSummaryAction(startDate, endDate),
+        getTransactionsAction(startDate, endDate),
+        startDate && endDate ? getConsumptionAnalysisAction(startDate, endDate) : Promise.resolve([]),
+        startDate && endDate ? getRechargeAnalysisAction(startDate, endDate) : Promise.resolve([]),
+        getEnabledPaymentConfigs(),
+      ])
+
+      setPaymentConfigs(configs)
+      setData({
+        balance: bal,
+        summary: sum,
+        transactions: txs as Transaction[],
+        consumptionData: consumption,
+        rechargeData: recharge,
+        isLoading: false,
+      })
+    } catch (error) {
+      console.error('Failed to fetch billing data:', error)
+      setData((prev) => ({ ...prev, isLoading: false }))
+    }
+  }, [dateRange])
+
   useEffect(() => {
     if (!open) return
-
-    const fetchData = async () => {
-      setData((prev) => ({ ...prev, isLoading: true }))
-
-      try {
-        const startDate = dateRange?.from?.toISOString()
-        const endDate = dateRange?.to?.toISOString()
-
-        const [bal, sum, txs, consumption, recharge] = await Promise.all([
-          getBalanceAction(),
-          getBillingSummaryAction(startDate, endDate),
-          getTransactionsAction(startDate, endDate),
-          startDate && endDate ? getConsumptionAnalysisAction(startDate, endDate) : Promise.resolve([]),
-          startDate && endDate ? getRechargeAnalysisAction(startDate, endDate) : Promise.resolve([]),
-        ])
-
-        setData({
-          balance: bal,
-          summary: sum,
-          transactions: txs as Transaction[],
-          consumptionData: consumption,
-          rechargeData: recharge,
-          isLoading: false,
-        })
-      } catch (error) {
-        console.error('Failed to fetch billing data:', error)
-        setData((prev) => ({ ...prev, isLoading: false }))
-      }
-    }
-
+    // Fetching data when modal opens is intentional and necessary
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData()
-  }, [open, dateRange])
+  }, [open, fetchData])
+
+  // 处理支付方式选择
+  const handleSelectPayment = (provider: 'wechat' | 'alipay' | 'stripe', config: any) => {
+    setSelectedPaymentConfig(config)
+
+    if (provider === 'wechat') {
+      setWechatPayOpen(true)
+    } else if (provider === 'alipay') {
+      setAlipayOpen(true)
+    } else if (provider === 'stripe') {
+      toast.error('Stripe 支付即将上线')
+    }
+  }
+
+  // 处理充值成功
+  const handleRechargeSuccess = () => {
+    fetchData() // 刷新数据
+  }
 
   // 图表数据处理
   const chartData = useMemo(() => {
@@ -528,8 +562,6 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                   selected={dateRange}
                   onSelect={setDateRange}
                   numberOfMonths={2}
-                  locale={zhCN}
-                  initialFocus
                 />
               </PopoverContent>
             </Popover>
@@ -614,7 +646,12 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                 >
                   {/* Balance and Stats Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <BalanceCard balance={balance} isLoading={isLoading} />
+                    <BalanceCard
+                      balance={balance}
+                      isLoading={isLoading}
+                      paymentConfigs={paymentConfigs}
+                      onSelectPayment={handleSelectPayment}
+                    />
 
                     <div className="md:col-span-2 grid grid-cols-2 gap-4">
                       <StatCard
@@ -733,6 +770,22 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
           </div>
         </div>
       </DialogContent>
+
+      {/* WeChat Pay Modal */}
+      <WeChatPayModal
+        open={wechatPayOpen}
+        onOpenChange={setWechatPayOpen}
+        onSuccess={handleRechargeSuccess}
+        config={selectedPaymentConfig}
+      />
+
+      {/* Alipay Modal */}
+      <AlipayModal
+        open={alipayOpen}
+        onOpenChange={setAlipayOpen}
+        onSuccess={handleRechargeSuccess}
+        config={selectedPaymentConfig}
+      />
     </Dialog>
   )
 }

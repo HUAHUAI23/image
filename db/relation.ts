@@ -1,7 +1,16 @@
 // db/relations.ts
 import { relations } from 'drizzle-orm'
 
-import { accounts, promptTemplates,tasks, transactions, userIdentities, users } from './schema'
+import {
+  accounts,
+  chargeOrders,
+  paymentConfigs,
+  promptTemplates,
+  tasks,
+  transactions,
+  userIdentities,
+  users,
+} from './schema'
 
 // ==================== Relations 定义 ====================
 
@@ -30,6 +39,7 @@ export const accountsRelations = relations(accounts, ({ one, many }) => ({
   }),
   tasks: many(tasks),
   transactions: many(transactions),
+  chargeOrders: many(chargeOrders),
 }))
 
 // 任务关系
@@ -60,4 +70,27 @@ export const transactionsRelations = relations(transactions, ({ one }) => ({
     fields: [transactions.taskId],
     references: [tasks.id],
   }),
+  chargeOrder: one(chargeOrders, {
+    fields: [transactions.chargeOrderId],
+    references: [chargeOrders.id],
+  }),
 }))
+
+// 充值订单关系
+export const chargeOrdersRelations = relations(chargeOrders, ({ one }) => ({
+  account: one(accounts, {
+    fields: [chargeOrders.accountId],
+    references: [accounts.id],
+  }),
+  transaction: one(transactions, {
+    fields: [chargeOrders.transactionId],
+    references: [transactions.id],
+  }),
+  operator: one(users, {
+    fields: [chargeOrders.operatorId],
+    references: [users.id],
+  }),
+}))
+
+// 支付配置关系（暂无关联表）
+export const paymentConfigsRelations = relations(paymentConfigs, () => ({}))

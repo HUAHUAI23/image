@@ -46,10 +46,11 @@ export async function getBillingSummaryAction(
   }
 
   // Query all relevant transactions
+  // Note: All 'recharge' transactions are successful by design
+  // (transactions are only created after successful payment)
   const result = await db
     .select({
       category: transactions.category,
-      rechargeStatus: transactions.rechargeStatus,
       totalAmount: sql<number>`SUM(${transactions.amount})`.as('total_amount'),
     })
     .from(transactions)
@@ -59,7 +60,7 @@ export async function getBillingSummaryAction(
         sql`${transactions.category} IN ('task_charge', 'analysis_charge', 'task_refund', 'recharge')`
       )
     )
-    .groupBy(transactions.category, transactions.rechargeStatus)
+    .groupBy(transactions.category)
     .execute()
 
   // Calculate totals
@@ -72,7 +73,8 @@ export async function getBillingSummaryAction(
       totalConsumption += amount
     } else if (row.category === 'task_refund') {
       totalConsumption -= amount
-    } else if (row.category === 'recharge' && row.rechargeStatus === 'success') {
+    } else if (row.category === 'recharge') {
+      // All recharge transactions are successful
       totalRecharge += amount
     }
   })
@@ -222,7 +224,9 @@ export async function getRechargeAnalysisAction(
 
   if (!account) return []
 
-  // Query for successful recharge transactions
+  // Query for recharge transactions
+  // Note: All recharge transactions are successful by design
+  // (transactions are only created after successful payment)
   const result = await db
     .select({
       date: sql<string>`DATE(${transactions.createdAt})`.as('date'),
@@ -233,7 +237,6 @@ export async function getRechargeAnalysisAction(
       and(
         eq(transactions.accountId, account.id),
         eq(transactions.category, 'recharge'),
-        sql`${transactions.rechargeStatus} = 'success'`,
         gte(transactions.createdAt, new Date(startDate)),
         lte(transactions.createdAt, new Date(endDate))
       )
