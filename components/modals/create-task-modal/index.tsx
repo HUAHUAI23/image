@@ -18,7 +18,19 @@ import { toast } from 'sonner'
 
 import { getPricesAction } from '@/app/actions/task'
 import { getPromptTemplatesAction } from '@/app/actions/template'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/animate-ui/components/animate/tooltip'
 import { Dialog, DialogContent, DialogTitle } from '@/components/animate-ui/components/radix/dialog'
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from '@/components/animate-ui/components/radix/hover-card'
+import { Switch } from '@/components/animate-ui/components/radix/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/animate-ui/components/radix/tabs'
 import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer'
@@ -171,6 +183,9 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
       generationOptions: {
         size: DEFAULT_SIZE,
         sequentialImageGeneration: DEFAULT_SEQUENTIAL_MODE,
+        sequentialImageGenerationOptions: {
+          maxImages: undefined,
+        },
         watermark: false,
         optimizePromptOptions: {
           mode: 'standard',
@@ -264,6 +279,9 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
       generationOptions: {
         size: DEFAULT_SIZE,
         sequentialImageGeneration: DEFAULT_SEQUENTIAL_MODE,
+        sequentialImageGenerationOptions: {
+          maxImages: undefined,
+        },
         watermark: false,
         optimizePromptOptions: {
           mode: 'standard',
@@ -420,408 +438,333 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
 
       <div className={cn('flex flex-1', isMobile ? 'flex-col overflow-y-auto' : 'overflow-hidden')}>
         {/* Main Content: Inputs */}
-        <div
-          className={cn(
-            'flex-1 flex flex-col gap-6 bg-background',
-            isMobile ? 'p-4 pb-6' : 'p-8 overflow-y-auto'
-          )}
-        >
-          {/* Task Name */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium flex items-center gap-2">
-              任务名称
-              <span className="text-xs text-destructive">*</span>
-            </Label>
-            <Input
-              {...register('name')}
-              placeholder="例如: 产品宣传图-金融风格"
-              className="h-11 text-base shadow-sm transition-shadow focus:shadow-md"
-            />
-            {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
-          </div>
-
-          {/* User Prompt */}
-          <div className="space-y-2 flex-1 flex flex-col">
-            <div className="flex items-center justify-between">
-              <Label className="text-sm font-medium flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-primary" />
-                <AnimatedLabel animationKey={isImageTask ? 'image-desc' : 'text-prompt'}>
-                  {isImageTask ? '图片描述 (可修改)' : '提示词'}
-                </AnimatedLabel>
-                {isTextTask && <span className="text-xs text-destructive">*</span>}
-              </Label>
-              {isAnalyzing && (
-                <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> 分析中...
-                </span>
-              )}
-            </div>
-            <Textarea
-              {...register('userPrompt')}
-              key={`prompt-${normalizedType}`}
-              placeholder={
-                isImageTask
-                  ? '上传图片后自动分析，也可手动编辑...'
-                  : '请输入生成图片的描述，越详细越好...'
-              }
-              className={cn(
-                'flex-1 min-h-[200px] resize-none text-base leading-relaxed shadow-sm transition-all focus:shadow-md p-4',
-                isMobile && 'min-h-40'
-              )}
-              disabled={isAnalyzing}
-            />
-            {errors.userPrompt && (
-              <p className="text-xs text-destructive">{errors.userPrompt.message}</p>
+        {/* Left Side Wrapper */}
+        <div className="flex-1 flex flex-col min-h-0 bg-background">
+          <div
+            className={cn(
+              'flex-1 flex flex-col gap-6',
+              isMobile ? 'p-4 overflow-y-auto' : 'p-8 overflow-y-auto'
             )}
-          </div>
-
-          {/* Settings Section */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+          >
+            {/* Task Name */}
             <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground/80">风格模板</Label>
-              <Controller
-                name="templateId"
-                control={control}
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger className="h-11 w-full shadow-sm">
-                      <SelectValue placeholder="选择风格模板..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={DEFAULT_TEMPLATE_ID}>不使用模板 (默认)</SelectItem>
-                      {templates.map((t) => (
-                        <SelectItem key={t.id} value={t.id.toString()}>
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {errors.templateId && (
-                <p className="text-xs text-destructive">{errors.templateId.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-sm font-medium text-foreground/80">图片尺寸</Label>
-              <Controller
-                name="generationOptions.size"
-                control={control}
-                render={({ field }) => {
-                  const getSizeLabel = (value: string | undefined) => {
-                    const sizeLabels: Record<string, string> = {
-                      '1K': '1K (智能尺寸)',
-                      '2K': '2K (智能尺寸)',
-                      '4K': '4K (智能尺寸)',
-                      '2048x2048': '2048×2048 (1:1)',
-                      '2560x1440': '2560×1440 (16:9)',
-                      '1440x2560': '1440×2560 (9:16)',
-                      '2304x1728': '2304×1728 (4:3)',
-                      '1728x2304': '1728×2304 (3:4)',
-                    }
-                    return value ? sizeLabels[value] || value : '2K (智能尺寸)'
-                  }
-
-                  return (
-                    <Select value={field.value || '2K'} onValueChange={field.onChange}>
-                      <SelectTrigger className="h-11 w-full shadow-sm">
-                        <SelectValue placeholder="选择图片尺寸">
-                          {getSizeLabel(field.value)}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="1K">1K (智能尺寸)</SelectItem>
-                        <SelectItem value="2K">2K (智能尺寸)</SelectItem>
-                        <SelectItem value="4K">4K (智能尺寸)</SelectItem>
-                        <SelectItem value="2048x2048">2048×2048 (1:1)</SelectItem>
-                        <SelectItem value="2560x1440">2560×1440 (16:9)</SelectItem>
-                        <SelectItem value="1440x2560">1440×2560 (9:16)</SelectItem>
-                        <SelectItem value="2304x1728">2304×1728 (4:3)</SelectItem>
-                        <SelectItem value="1728x2304">1728×2304 (3:4)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Batch Size and Sequential Mode */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="flex flex-col">
-              <Label className="text-sm font-medium text-foreground/80 mb-2">
-                <AnimatedLabel animationKey={isSequentialMode ? 'batch-count' : 'image-count'}>
-                  {isSequentialMode ? '批次数量' : '生成数量'}
-                </AnimatedLabel>
+              <Label className="text-sm font-medium flex items-center gap-2">
+                任务名称
+                <span className="text-xs text-destructive">*</span>
               </Label>
-              <div className="relative">
-                <Input
-                  type="number"
-                  min={1}
-                  max={500}
-                  value={imageNumber}
-                  onChange={(e) => {
-                    const value = parseInt(e.target.value, 10)
-                    const normalized = Number.isNaN(value) ? DEFAULT_IMAGE_NUMBER : value
-                    const clampedValue = Math.max(1, Math.min(500, normalized))
-                    setValue('imageNumber', clampedValue, {
-                      shouldValidate: true,
-                      shouldDirty: true,
-                    })
-                  }}
-                  onBlur={(e) => {
-                    const value = parseInt(e.target.value, 10)
-                    if (Number.isNaN(value) || value < 1) {
-                      setValue('imageNumber', 1, { shouldValidate: true })
-                      toast.error('数量不能小于1')
-                    } else if (value > 500) {
-                      setValue('imageNumber', 500, { shouldValidate: true })
-                      toast.error('数量不能超过500')
-                    }
-                  }}
-                  placeholder="1-500"
-                  className="h-11 w-full shadow-sm pr-16 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none select-none">
-                  <AnimatedUnit animationKey={isSequentialMode ? 'unit-batch' : 'unit-image'}>
-                    {isSequentialMode ? '批' : '张'}
-                  </AnimatedUnit>
-                  <span className="text-xs text-muted-foreground/40">/ 500</span>
-                </div>
-              </div>
-              <div className="h-5 mt-2 flex items-start">
-                {errors.imageNumber && (
-                  <p className="text-xs text-destructive leading-5">{errors.imageNumber.message}</p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col">
-              <Label className="text-sm font-medium text-foreground/80 mb-2">组图模式</Label>
-              <Controller
-                name="generationOptions.sequentialImageGeneration"
-                control={control}
-                render={({ field }) => (
-                  <Select value={field.value || 'disabled'} onValueChange={field.onChange}>
-                    <SelectTrigger className="h-11 w-full shadow-sm">
-                      <SelectValue placeholder="选择组图模式">
-                        {field.value === 'auto' ? '开启 (AI智能生成组图)' : '关闭 (每批生成1张)'}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="disabled">关闭 (每批生成1张)</SelectItem>
-                      <SelectItem value="auto">开启 (AI智能生成组图)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
+              <Input
+                {...register('name')}
+                placeholder="例如: 产品宣传图-金融风格"
+                className="h-11 text-base shadow-sm transition-shadow focus:shadow-md"
               />
-              <div className="h-5 mt-2 flex items-start">
-                <p className="text-[10px] text-muted-foreground/60 leading-5">
-                  {isSequentialMode ? '⚠️ 开启后每批可能生成多张关联图片' : '每批固定生成1张图片'}
-                </p>
-              </div>
+              {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
             </div>
-          </div>
 
-          {/* Advanced Options */}
-          <div className="space-y-2">
-            <Label className="text-sm font-medium text-foreground/80">提示词优化</Label>
-            <Controller
-              name="generationOptions.optimizePromptOptions.mode"
-              control={control}
-              render={({ field }) => (
-                <Select value={field.value || 'standard'} onValueChange={field.onChange}>
-                  <SelectTrigger className="h-11 w-full shadow-sm">
-                    <SelectValue placeholder="选择优化模式">
-                      {field.value === 'fast' ? '快速模式 (速度优先)' : '标准模式 (质量优先)'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="standard">标准模式 (质量优先)</SelectItem>
-                    <SelectItem value="fast">快速模式 (速度优先)</SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* User Prompt */}
+            <div className="space-y-2 flex-1 flex flex-col">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <AnimatedLabel animationKey={isImageTask ? 'image-desc' : 'text-prompt'}>
+                    {isImageTask ? '图片描述 (可修改)' : '提示词'}
+                  </AnimatedLabel>
+                  {isTextTask && <span className="text-xs text-destructive">*</span>}
+                </Label>
+                {isAnalyzing && (
+                  <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" /> 分析中...
+                  </span>
+                )}
+              </div>
+              <Textarea
+                {...register('userPrompt')}
+                key={`prompt-${normalizedType}`}
+                placeholder={
+                  isImageTask
+                    ? '上传图片后自动分析，也可手动编辑...'
+                    : '请输入生成图片的描述，越详细越好...'
+                }
+                className={cn(
+                  'flex-1 min-h-[200px] resize-none text-base leading-relaxed shadow-sm transition-all focus:shadow-md p-4',
+                  isMobile && 'min-h-40'
+                )}
+                disabled={isAnalyzing}
+              />
+              {errors.userPrompt && (
+                <p className="text-xs text-destructive">{errors.userPrompt.message}</p>
               )}
-            />
-            <p className="text-[10px] text-muted-foreground/60">
-              标准模式生成质量更高但耗时稍长，快速模式生成速度更快
-            </p>
-          </div>
+            </div>
 
-          {/* Sequential Mode Options */}
-          {isSequentialMode && (
-            <div className="p-4 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-800/30 rounded-lg space-y-3">
-              <div className="flex items-start gap-2">
-                <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5" />
-                <div className="flex-1 space-y-2">
-                  <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
-                    组图模式已开启
-                  </p>
-                  <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
-                    AI
-                    将根据提示词智能判断每批生成的图片数量。您可以设置每批最多生成的图片数量，未设置时默认最多15张。
-                  </p>
+            {/* Settings Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Image Number (Moved here) */}
+              <div className="flex flex-col space-y-3">
+                <Label className="text-sm font-medium text-foreground/80">
+                  <AnimatedLabel animationKey={isSequentialMode ? 'batch-count' : 'image-count'}>
+                    {isSequentialMode ? '批次数量' : '生成数量'}
+                  </AnimatedLabel>
+                </Label>
+                <div className="flex items-center gap-2">
+                  {[1, 4, 8].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setValue('imageNumber', num, { shouldValidate: true })}
+                      className={cn(
+                        'flex-1 h-10 rounded-md border text-sm font-medium transition-all duration-200',
+                        imageNumber === num
+                          ? 'border-primary bg-primary/5 text-primary shadow-sm'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50 text-muted-foreground'
+                      )}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                  <div className="relative w-20">
+                    <Input
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={imageNumber}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value, 10)
+                        const normalized = Number.isNaN(value) ? DEFAULT_IMAGE_NUMBER : value
+                        const clampedValue = Math.max(1, Math.min(500, normalized))
+                        setValue('imageNumber', clampedValue, {
+                          shouldValidate: true,
+                          shouldDirty: true,
+                        })
+                      }}
+                      className="h-10 text-center px-2 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
+                      <AnimatedUnit animationKey={isSequentialMode ? 'unit-batch' : 'unit-image'}>
+                        {isSequentialMode ? '批' : '张'}
+                      </AnimatedUnit>
+                    </span>
+                  </div>
+                </div>
+                <div className="h-5 flex items-start">
+                  {errors.imageNumber && (
+                    <p className="text-xs text-destructive leading-5">{errors.imageNumber.message}</p>
+                  )}
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-medium text-amber-900 dark:text-amber-100">
-                  每批最多生成 (可选)
-                </Label>
+
+              <div className="space-y-3">
+                <Label className="text-sm font-medium text-foreground/80">图片尺寸</Label>
                 <Controller
-                  name="generationOptions.sequentialImageGenerationOptions.maxImages"
+                  name="generationOptions.size"
                   control={control}
                   render={({ field }) => {
-                    const currentValue = field.value?.toString() || 'auto'
+                    const sizes = [
+                      { value: '1K', label: '1K', desc: '智能尺寸' },
+                      { value: '2K', label: '2K', desc: '智能尺寸' },
+                      { value: '4K', label: '4K', desc: '智能尺寸' },
+                      { value: '2048x2048', label: '1:1', desc: '2048×2048' },
+                      { value: '2560x1440', label: '16:9', desc: '2560×1440' },
+                      { value: '1440x2560', label: '9:16', desc: '1440×2560' },
+                      { value: '2304x1728', label: '4:3', desc: '2304×1728' },
+                      { value: '1728x2304', label: '3:4', desc: '1728×2304' },
+                    ]
+
                     return (
-                      <Select
-                        value={currentValue}
-                        onValueChange={(v) =>
-                          field.onChange(v === 'auto' ? undefined : parseInt(v))
-                        }
-                      >
-                        <SelectTrigger className="h-9 bg-background">
-                          <SelectValue placeholder="选择最大数量">
-                            {currentValue === 'auto'
-                              ? '由 AI 决定 (最多15张)'
-                              : `最多 ${field.value} 张`}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="auto">由 AI 决定 (最多15张)</SelectItem>
-                          {[3, 5, 8, 10, 12, 15].map((n) => (
-                            <SelectItem key={n} value={n.toString()}>
-                              最多 {n} 张
-                            </SelectItem>
+                      <div className="grid grid-cols-4 gap-2">
+                        <TooltipProvider openDelay={0}>
+                          {sizes.map((size) => (
+                            <Tooltip key={size.value} side="top">
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => field.onChange(size.value)}
+                                  className={cn(
+                                    'flex flex-col items-center justify-center p-2 rounded-lg border transition-all duration-200',
+                                    field.value === size.value
+                                      ? 'border-foreground bg-foreground text-background shadow-sm'
+                                      : 'border-border hover:border-primary/50 hover:bg-muted/50 text-muted-foreground'
+                                  )}
+                                >
+                                  <span className="text-xs font-medium">{size.label}</span>
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs">
+                                <p>{size.desc}</p>
+                              </TooltipContent>
+                            </Tooltip>
                           ))}
-                        </SelectContent>
-                      </Select>
+                        </TooltipProvider>
+                      </div>
                     )
                   }}
                 />
               </div>
             </div>
-          )}
 
-          {/* Price Estimation */}
-          <div
-            className={cn(
-              'px-4 py-3 rounded-lg border space-y-3',
-              isSequentialMode
-                ? 'bg-amber-50/30 dark:bg-amber-950/10 border-amber-200/50 dark:border-amber-800/30'
-                : 'bg-primary/5 border-primary/10'
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <Sparkles className="w-4 h-4" />
-                <span
-                  className={
-                    isSequentialMode ? 'text-amber-900 dark:text-amber-100' : 'text-primary/80'
-                  }
-                >
-                  {isSequentialMode ? '预付费用 (最大值)' : '预计消耗点数'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    'text-xl font-bold',
-                    isSequentialMode ? 'text-amber-700 dark:text-amber-300' : 'text-primary'
+            {/* Style Template and Sequential Mode */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Style Template (Moved here) */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium text-foreground/80">风格模板</Label>
+                <Controller
+                  name="templateId"
+                  control={control}
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger className="h-11 w-full shadow-sm">
+                        <SelectValue placeholder="选择风格模板..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={DEFAULT_TEMPLATE_ID}>不使用模板 (默认)</SelectItem>
+                        {templates.map((t) => (
+                          <SelectItem key={t.id} value={t.id.toString()}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   )}
-                >
-                  {formatCurrency(estimatedCost)}
-                </span>
+                />
+                {errors.templateId && (
+                  <p className="text-xs text-destructive">{errors.templateId.message}</p>
+                )}
+              </div>
+
+              <div className="flex flex-col space-y-3">
+                <div className="flex items-center justify-between h-5">
+                  <Label className="text-sm font-medium text-foreground/80">组图模式</Label>
+                  <TooltipProvider>
+                    <Tooltip side="top">
+                      <TooltipTrigger asChild>
+                        <div className="cursor-help text-muted-foreground hover:text-foreground transition-colors">
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>开启后 AI 将根据提示词智能生成一组关联图片</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+
+                <Controller
+                  name="generationOptions.sequentialImageGeneration"
+                  control={control}
+                  render={({ field }) => (
+                    <div className="flex items-center gap-3 h-10 p-1">
+                      <Switch
+                        checked={field.value === 'auto'}
+                        onCheckedChange={(checked) => field.onChange(checked ? 'auto' : 'disabled')}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {field.value === 'auto' ? '已开启' : '已关闭'}
+                      </span>
+                    </div>
+                  )}
+                />
+
+                <AnimatePresence>
+                  {isSequentialMode && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="pt-2 space-y-2">
+                        <Label className="text-xs font-medium text-muted-foreground">
+                          每批最多生成 (可选)
+                        </Label>
+                        <Controller
+                          name="generationOptions.sequentialImageGenerationOptions.maxImages"
+                          control={control}
+                          render={({ field }) => {
+                            const currentValue = field.value?.toString() || 'auto'
+                            return (
+                              <Select
+                                value={currentValue}
+                                onValueChange={(v) =>
+                                  field.onChange(v === 'auto' ? undefined : parseInt(v))
+                                }
+                              >
+                                <SelectTrigger className="h-9 w-full shadow-sm bg-background">
+                                  <SelectValue placeholder="选择最大数量">
+                                    {currentValue === 'auto'
+                                      ? '由 AI 决定 (最多15张)'
+                                      : `最多 ${field.value} 张`}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="auto">由 AI 决定 (最多15张)</SelectItem>
+                                  {[3, 5, 8, 10, 12, 15].map((n) => (
+                                    <SelectItem key={n} value={n.toString()}>
+                                      最多 {n} 张
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )
+                          }}
+                        />
+                        <p className="text-[10px] text-muted-foreground/60 leading-relaxed">
+                          ⚠️ 开启后每批可能生成多张关联图片
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
 
-            <div className="text-xs space-y-1.5">
-              <div className="flex items-center justify-between text-muted-foreground">
-                <span>单张价格</span>
-                <span className="font-medium">{formatCurrency(perImagePrice)}</span>
-              </div>
-
-              {!isSequentialMode ? (
-                // 传统模式：简单计算
-                <div className="flex items-center justify-between text-muted-foreground">
-                  <span>生成数量</span>
-                  <span className="font-medium">{imageNumber} 张</span>
-                </div>
-              ) : (
-                // 组图模式：详细计算
-                <>
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span>批次数量</span>
-                    <span className="font-medium">{imageNumber} 批</span>
-                  </div>
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <span>每批最多</span>
-                    <span className="font-medium">
-                      {generationOptions?.sequentialImageGenerationOptions?.maxImages || 15} 张
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between pt-1 border-t border-amber-200/50 dark:border-amber-800/30">
-                    <span className="text-amber-700 dark:text-amber-300 font-medium">预期最多</span>
-                    <span className="font-bold text-amber-700 dark:text-amber-300">
-                      {expectedImageCount} 张
-                    </span>
-                  </div>
-                </>
-              )}
-
-              <div className="flex items-center justify-between pt-1.5 border-t">
-                <span
-                  className={cn(
-                    'font-medium',
-                    isSequentialMode ? 'text-amber-800 dark:text-amber-200' : 'text-foreground'
-                  )}
-                >
-                  计费公式
-                </span>
-                <span
-                  className={cn(
-                    'font-mono text-[10px]',
-                    isSequentialMode
-                      ? 'text-amber-700 dark:text-amber-300'
-                      : 'text-muted-foreground'
-                  )}
-                >
-                  {!isSequentialMode
-                    ? `${imageNumber} × ${formatCurrency(perImagePrice)}`
-                    : `${imageNumber} × ${generationOptions?.sequentialImageGenerationOptions?.maxImages || 15} × ${formatCurrency(perImagePrice)}`}
-                </span>
-              </div>
-            </div>
-
-            {isSequentialMode && (
-              <div className="pt-2 mt-1 border-t border-amber-200/50 dark:border-amber-800/30">
-                <div className="flex items-start gap-2">
-                  <span className="text-amber-600 dark:text-amber-400 text-xs">💡</span>
-                  <p className="text-amber-700 dark:text-amber-300 text-[11px] leading-relaxed">
-                    <strong>组图模式说明：</strong>预付费按<strong>每批最多生成数</strong>
-                    计算。实际生成完成后， 系统会根据<strong>实际生成数量</strong>
-                    自动退还多余点数到您的账户。
-                  </p>
-                </div>
-                <div className="mt-2 p-2 bg-background/50 rounded text-[10px] text-amber-700 dark:text-amber-300">
-                  <div className="flex justify-between">
-                    <span>示例：预期最多 {expectedImageCount} 张</span>
-                  </div>
-                  <div className="flex justify-between mt-0.5">
-                    <span>实际生成：假设 {Math.floor(expectedImageCount * 0.6)} 张</span>
-                  </div>
-                  <div className="flex justify-between mt-0.5 font-medium">
-                    <span>自动退款：</span>
-                    <span>
-                      {formatCurrency(
-                        (expectedImageCount - Math.floor(expectedImageCount * 0.6)) * perImagePrice
+            {/* Advanced Options - Tiled Design */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium text-foreground/80">提示词优化</Label>
+              <Controller
+                name="generationOptions.optimizePromptOptions.mode"
+                control={control}
+                render={({ field }) => (
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => field.onChange('standard')}
+                      className={cn(
+                        'flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200',
+                        field.value === 'standard' || !field.value
+                          ? 'border-primary bg-primary/5 shadow-sm'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
                       )}
-                    </span>
+                    >
+                      <span className={cn("text-sm font-medium mb-1", (field.value === 'standard' || !field.value) ? "text-primary" : "text-foreground")}>
+                        标准模式
+                      </span>
+                      <span className="text-[10px] text-muted-foreground leading-relaxed">
+                        生成质量更高，细节更丰富，但耗时稍长
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => field.onChange('fast')}
+                      className={cn(
+                        'flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200',
+                        field.value === 'fast'
+                          ? 'border-primary bg-primary/5 shadow-sm'
+                          : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                      )}
+                    >
+                      <span className={cn("text-sm font-medium mb-1", field.value === 'fast' ? "text-primary" : "text-foreground")}>
+                        快速模式
+                      </span>
+                      <span className="text-[10px] text-muted-foreground leading-relaxed">
+                        生成速度更快，适合快速验证创意
+                      </span>
+                    </button>
                   </div>
-                </div>
-              </div>
-            )}
+                )}
+              />
+            </div>
+
           </div>
+
         </div>
 
         {/* Right Sidebar: Reference Images */}
@@ -829,7 +772,7 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
           className={cn(
             'border-l bg-muted/10 p-6 flex flex-col gap-4 shrink-0 transition-all duration-300 h-full',
             imageInputMode === 'single' ? 'overflow-hidden' : 'overflow-y-auto',
-            isMobile ? 'w-full border-l-0 border-t p-4 h-auto' : 'w-[400px]'
+            isMobile ? 'w-full border-l-0 border-t p-4 h-auto' : 'w-[480px]'
           )}
         >
           <div className="flex flex-col gap-4 shrink-0">
@@ -1064,38 +1007,239 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
       {/* Footer */}
       <div
         className={cn(
-          'flex items-center justify-end gap-3 px-6 py-4 border-t bg-muted/5 shrink-0',
+          'flex items-center justify-between gap-3 px-6 py-4 border-t bg-muted/5 shrink-0',
           isMobile && 'flex-col-reverse items-stretch gap-2 px-4 py-3'
         )}
       >
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => onOpenChange(false)}
-          className={cn('h-10 px-6', isMobile && 'w-full')}
-        >
-          取消
-        </Button>
-        <Button
-          type="submit"
-          disabled={isSubmitting || isAnalyzing}
-          className={cn(
-            'h-10 px-8 min-w-[140px] shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30',
-            isMobile && 'w-full justify-center'
-          )}
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              生成中...
-            </>
-          ) : (
-            <>
-              <Wand2 className="mr-2 h-4 w-4" />
-              立即生成
-            </>
-          )}
-        </Button>
+        {/* Price Summary (Left Side) */}
+        <div className={cn("flex items-center gap-2", isMobile && "justify-between w-full")}>
+          <HoverCard>
+            <HoverCardTrigger asChild>
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer group transition-all duration-300 hover:bg-muted/50 hover:scale-105 hover:shadow-md">
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors duration-200">
+                      {isSequentialMode ? '预付费用' : '预计消耗'}
+                    </span>
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+                    >
+                      <Sparkles className="w-3 h-3 text-muted-foreground/50 group-hover:text-primary transition-colors duration-200" />
+                    </motion.div>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className={cn("text-xl font-bold tracking-tight transition-all duration-200", isSequentialMode ? "text-amber-600 dark:text-amber-500 group-hover:text-amber-500 dark:group-hover:text-amber-400" : "text-primary group-hover:text-primary/80")}>
+                      {formatCurrency(estimatedCost)}
+                    </span>
+                  </div>
+                </div>
+                <div className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <div className="w-1 h-1 rounded-full bg-primary animate-pulse" />
+                </div>
+              </div>
+            </HoverCardTrigger>
+            <HoverCardContent side="top" align="start" className="w-[280px] p-0 border-none shadow-xl bg-transparent">
+              {/* Detailed Price Breakdown Card */}
+              <motion.div
+                className="w-full rounded-xl border bg-popover text-popover-foreground shadow-sm overflow-hidden"
+                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+              >
+                <div className="p-3 space-y-3">
+                  <motion.div
+                    className="flex items-center justify-between border-b pb-2"
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.05, duration: 0.2 }}
+                  >
+                    <span className="text-sm font-medium">费用明细</span>
+                    <span className={cn("text-sm font-bold", isSequentialMode ? "text-amber-600" : "text-primary")}>
+                      {formatCurrency(estimatedCost)}
+                    </span>
+                  </motion.div>
+
+                  <motion.div
+                    className="space-y-1.5"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.1, duration: 0.2 }}
+                  >
+                    <motion.div
+                      className="flex justify-between text-xs"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.15, duration: 0.2 }}
+                    >
+                      <span className="text-muted-foreground">单张价格</span>
+                      <span>{formatCurrency(perImagePrice)}</span>
+                    </motion.div>
+
+                    {!isSequentialMode ? (
+                      <motion.div
+                        className="flex justify-between text-xs"
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.2, duration: 0.2 }}
+                      >
+                        <span className="text-muted-foreground">生成数量</span>
+                        <span>{imageNumber} 张</span>
+                      </motion.div>
+                    ) : (
+                      <>
+                        <motion.div
+                          className="flex justify-between text-xs"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.2, duration: 0.2 }}
+                        >
+                          <span className="text-muted-foreground">批次数量</span>
+                          <span>{imageNumber} 批</span>
+                        </motion.div>
+                        <motion.div
+                          className="flex justify-between text-xs"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.25, duration: 0.2 }}
+                        >
+                          <span className="text-muted-foreground">每批上限</span>
+                          <span>{generationOptions?.sequentialImageGenerationOptions?.maxImages || 15} 张</span>
+                        </motion.div>
+                      </>
+                    )}
+
+                    <motion.div
+                      className="flex justify-between text-xs pt-1 border-t border-dashed mt-1"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.3, duration: 0.2 }}
+                    >
+                      <span className="text-muted-foreground">计费公式</span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {!isSequentialMode
+                          ? `${imageNumber} × ${formatCurrency(perImagePrice)}`
+                          : `${imageNumber} × ${generationOptions?.sequentialImageGenerationOptions?.maxImages || 15} × ${formatCurrency(perImagePrice)}`}
+                      </span>
+                    </motion.div>
+                  </motion.div>
+                </div>
+
+                {isSequentialMode && (
+                  <motion.div
+                    className="bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/30 dark:to-amber-900/20 px-3 py-2.5 border-t border-amber-200 dark:border-amber-900/30"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.35, duration: 0.3 }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <motion.span
+                        className="text-amber-600 dark:text-amber-400 text-sm flex-shrink-0 mt-0.5"
+                        initial={{ scale: 0, rotate: -180 }}
+                        animate={{ scale: 1, rotate: 0 }}
+                        transition={{ delay: 0.4, type: "spring", stiffness: 200 }}
+                      >
+                        💡
+                      </motion.span>
+                      <div className="space-y-2">
+                        <motion.p
+                          className="text-[11px] text-amber-900 dark:text-amber-200 font-semibold leading-relaxed"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.45, duration: 0.2 }}
+                        >
+                          组图模式 · 预扣多退机制
+                        </motion.p>
+
+                        {/* 预扣费用计算 */}
+                        <motion.div
+                          className="space-y-1"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.5, duration: 0.2 }}
+                        >
+                          <p className="text-[10px] text-amber-800 dark:text-amber-300 font-medium">
+                            ① 预扣费用（先冻结）
+                          </p>
+                          <div className="bg-amber-100/50 dark:bg-amber-900/20 rounded px-2 py-1.5 font-mono text-[10px] text-amber-900 dark:text-amber-200">
+                            {imageNumber} 批 × {generationOptions?.sequentialImageGenerationOptions?.maxImages || 15} 张 × {formatCurrency(perImagePrice)} = <strong>{formatCurrency(estimatedCost)}</strong>
+                          </div>
+                        </motion.div>
+
+                        {/* 实际费用计算示例 */}
+                        <motion.div
+                          className="space-y-1"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.55, duration: 0.2 }}
+                        >
+                          <p className="text-[10px] text-amber-800 dark:text-amber-300 font-medium">
+                            ② 实际费用（按实际生成）
+                          </p>
+                          <div className="bg-amber-100/50 dark:bg-amber-900/20 rounded px-2 py-1.5 font-mono text-[10px] text-amber-900 dark:text-amber-200">
+                            {imageNumber} 批 × <span className="text-amber-600 dark:text-amber-400 font-semibold">实际生成数</span> × {formatCurrency(perImagePrice)}
+                          </div>
+                        </motion.div>
+
+                        {/* 退费计算示例 */}
+                        <motion.div
+                          className="space-y-1"
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.6, duration: 0.2 }}
+                        >
+                          <p className="text-[10px] text-amber-800 dark:text-amber-300 font-medium">
+                            ③ 自动退费（差额退回）
+                          </p>
+                          <div className="bg-green-100/50 dark:bg-green-900/20 rounded px-2 py-1.5 text-[10px]">
+                            <div className="font-mono text-green-900 dark:text-green-200 mb-1">
+                              退费 = 预扣 - 实际
+                            </div>
+                            <div className="text-green-800 dark:text-green-300 text-[9px]">
+                              例：每批实际生成 {Math.ceil((generationOptions?.sequentialImageGenerationOptions?.maxImages || 15) * 0.6)} 张时，退还 <strong className="text-green-700 dark:text-green-400">{formatCurrency(imageNumber * ((generationOptions?.sequentialImageGenerationOptions?.maxImages || 15) - Math.ceil((generationOptions?.sequentialImageGenerationOptions?.maxImages || 15) * 0.6)) * perImagePrice)}</strong>
+                            </div>
+                          </div>
+                        </motion.div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </motion.div>
+            </HoverCardContent>
+          </HoverCard>
+        </div>
+
+        <div className={cn("flex items-center gap-3", isMobile && "w-full")}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            className={cn('h-10 px-6', isMobile && 'w-full')}
+          >
+            取消
+          </Button>
+          <Button
+            type="submit"
+            disabled={isSubmitting || isAnalyzing}
+            className={cn(
+              'h-10 px-8 min-w-[140px] shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30',
+              isMobile && 'w-full justify-center'
+            )}
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                生成中...
+              </>
+            ) : (
+              <>
+                <Wand2 className="mr-2 h-4 w-4" />
+                立即生成
+              </>
+            )}
+          </Button>
+        </div>
       </div>
     </form>
   )
