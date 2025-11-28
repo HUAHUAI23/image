@@ -1,23 +1,38 @@
+/**
+ * Create Task Modal - Main Component
+ *
+ * 创建任务模态框主组件
+ *
+ * @description
+ * 提供完整的AI图片生成任务创建功能，支持：
+ * - 文生图（Text-to-Image）和图生图（Image-to-Image）两种模式
+ * - 单图/多图上传（最多10张）
+ * - VLM智能图片分析（单图模式）
+ * - 可配置的生成参数（尺寸、数量、组图模式等）
+ * - 风格模板选择
+ * - 实时费用预估
+ *
+ * @module CreateTaskModal
+ */
+
 'use client'
 
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+// ==================== React & Hooks ====================
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Controller, FieldErrors, Resolver, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import {
-  Image as ImageIcon,
-  Layers,
-  Loader2,
-  Sparkles,
-  Trash2,
-  Type,
-  UploadCloud,
-  Wand2,
-} from 'lucide-react'
+// ==================== Icons ====================
+import { Loader2, Sparkles, Trash2, Type, UploadCloud, Wand2 } from 'lucide-react'
+import { Image as ImageIcon } from 'lucide-react'
+// ==================== Animations ====================
 import { AnimatePresence, motion } from 'motion/react'
+// ==================== Notifications ====================
 import { toast } from 'sonner'
 
+// ==================== Server Actions ====================
 import { getPricesAction } from '@/app/actions/task'
 import { getPromptTemplatesAction } from '@/app/actions/template'
+// ==================== UI Components ====================
 import {
   Tooltip,
   TooltipContent,
@@ -44,9 +59,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+// ==================== Hooks & Utils ====================
 import { useIsMobile } from '@/hooks/use-mobile'
 import { formatCurrency } from '@/lib/const'
 import { cn } from '@/lib/utils'
+// ==================== Validation & Types ====================
 import {
   createTaskFormSchema,
   CreateTaskFormValues,
@@ -57,111 +74,27 @@ import {
   DEFAULT_TEMPLATE_ID,
 } from '@/lib/validations/task'
 
+import { AnimatedLabel, AnimatedUnit, ImageModeToggle } from './components'
+// ==================== Local Modules ====================
 import { IMAGE_ACCEPT_TYPES, MAX_IMAGES } from './constants'
+import { CreateTaskModalProps, PromptTemplate } from './types'
 import { useImageManagement } from './use-image-management'
 
-type Template = {
-  id: number
-  name: string
-  content: string
-  category: string
-}
-
-interface CreateTaskModalProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onSuccess?: () => void
-}
-
-// ========== Local Helper Components ==========
-
-/** Animated label component for smooth text transitions */
-function AnimatedLabel({ children, animationKey }: { children: ReactNode; animationKey: string }) {
-  return (
-    <AnimatePresence mode="wait">
-      <motion.span
-        key={animationKey}
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 10 }}
-        transition={{ duration: 0.2 }}
-      >
-        {children}
-      </motion.span>
-    </AnimatePresence>
-  )
-}
-
-/** Animated unit label for batch/image count */
-function AnimatedUnit({ children, animationKey }: { children: ReactNode; animationKey: string }) {
-  return (
-    <AnimatePresence mode="wait">
-      <motion.span
-        key={animationKey}
-        initial={{ opacity: 0, scale: 0.8 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.8 }}
-        transition={{ duration: 0.15 }}
-        className="text-sm text-muted-foreground"
-      >
-        {children}
-      </motion.span>
-    </AnimatePresence>
-  )
-}
-
-/** Image mode toggle with animated background */
-interface ImageModeToggleProps {
-  mode: 'single' | 'multi'
-  onModeChange: (mode: 'single' | 'multi') => void
-  onSwitchToSingle?: () => void
-}
-
-function ImageModeToggle({ mode, onModeChange, onSwitchToSingle }: ImageModeToggleProps) {
-  return (
-    <div className="relative grid grid-cols-2 p-1 bg-muted/50 rounded-lg border">
-      {/* Animated Background Highlight */}
-      <motion.div
-        className="absolute inset-1 bg-background rounded-md shadow-sm border border-transparent dark:border-input dark:bg-input/30"
-        initial={false}
-        animate={{ x: mode === 'single' ? '0%' : '100%' }}
-        transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-        style={{ width: 'calc(50% - 4px)' }}
-      />
-
-      <button
-        type="button"
-        onClick={() => {
-          if (mode !== 'single') {
-            onSwitchToSingle?.()
-            onModeChange('single')
-          }
-        }}
-        className={cn(
-          'relative z-10 flex items-center justify-center gap-2 py-1.5 text-xs font-medium rounded-md transition-colors duration-300',
-          mode === 'single' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-        )}
-      >
-        <ImageIcon className="w-3.5 h-3.5" />
-        单图模式
-      </button>
-
-      <button
-        type="button"
-        onClick={() => onModeChange('multi')}
-        className={cn(
-          'relative z-10 flex items-center justify-center gap-2 py-1.5 text-xs font-medium rounded-md transition-colors duration-300',
-          mode === 'multi' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-        )}
-      >
-        <Layers className="w-3.5 h-3.5" />
-        多图模式
-      </button>
-    </div>
-  )
-}
-
+/**
+ * 创建任务模态框组件
+ *
+ * @param props - 组件属性
+ * @param props.open - 模态框是否打开
+ * @param props.onOpenChange - 模态框打开/关闭状态改变回调
+ * @param props.onSuccess - 任务创建成功回调
+ */
 export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskModalProps) {
+  // ==================== 表单管理 ====================
+
+  /**
+   * React Hook Form 实例
+   * 负责表单验证、状态管理和提交
+   */
   const {
     control,
     handleSubmit,
@@ -194,13 +127,25 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     },
   })
 
-  const [templates, setTemplates] = useState<Template[]>([])
+  // ==================== 组件状态 ====================
+
+  /** 提示词模板列表 */
+  const [templates, setTemplates] = useState<PromptTemplate[]>([])
+
+  /** 价格配置列表 */
   const [prices, setPrices] = useState<any[]>([])
+
+  /** 是否为移动端 */
   const isMobile = useIsMobile()
+
+  /** 标题组件（根据设备类型选择） */
   const TitleComponent = isMobile ? DrawerTitle : DialogTitle
+
+  /** 模态框激活状态ref（用于异步操作校验） */
   const isModalActiveRef = useRef(open)
 
-  // Watch form values
+  // ==================== 表单字段监听 ====================
+
   const normalizedType = watch('type') || DEFAULT_TASK_TYPE
   const taskName = watch('name')
   const imageNumber = watch('imageNumber')
@@ -208,12 +153,23 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
   const sequentialMode = watch('generationOptions.sequentialImageGeneration')
   const maxImages = watch('generationOptions.sequentialImageGenerationOptions.maxImages')
 
-  // Computed values
+  // ==================== 派生状态 ====================
+
+  /** 是否为图生图任务 */
   const isImageTask = normalizedType === 'image_to_image'
+
+  /** 是否为文生图任务 */
   const isTextTask = normalizedType === 'text_to_image'
+
+  /** 是否开启组图模式 */
   const isSequentialMode = sequentialMode === 'auto'
 
-  // Use image management hook
+  // ==================== 图片管理 ====================
+
+  /**
+   * 图片管理Hook
+   * 负责图片上传、预览、VLM分析等所有图片相关逻辑
+   */
   const imageManagement = useImageManagement({
     taskName,
     isImageTask,
@@ -238,6 +194,8 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
     cancelAnalysis,
     analyzeImage,
   } = imageManagement
+
+  // ==================== 事件处理器 ====================
   // Handle task type change
   const handleTypeChange = useCallback(
     (nextType: string) => {
@@ -466,9 +424,9 @@ export function CreateTaskModal({ open, onOpenChange, onSuccess }: CreateTaskMod
                 <Label className="text-sm font-medium flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-primary" />
                   <AnimatedLabel animationKey={isImageTask ? 'image-desc' : 'text-prompt'}>
-                    {isImageTask ? '图片描述 (可修改)' : '提示词'}
+                    {isImageTask ? '图片描述' : '提示词'}
                   </AnimatedLabel>
-                  {isTextTask && <span className="text-xs text-destructive">*</span>}
+                  <span className="text-xs text-destructive">*</span>
                 </Label>
                 {isAnalyzing && (
                   <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">

@@ -113,8 +113,8 @@ export const createTaskFormSchema = z
     // 生成选项
     generationOptions: generationOptionsSchema.optional(),
   })
-  .refine((data) => data.type !== 'text_to_image' || data.userPrompt.length > 0, {
-    message: '文生图必须提供提示词',
+  .refine((data) => data.userPrompt.length > 0, {
+    message: '提示词不能为空',
     path: ['userPrompt'],
   })
   .refine(
@@ -146,8 +146,8 @@ export const createTaskPayloadSchema = z
     originalImageUrls: z.array(z.string().url('图片地址格式不正确')).default([]),
     generationOptions: generationOptionsSchema.optional(),
   })
-  .refine((data) => data.type !== 'text_to_image' || data.userPrompt.length > 0, {
-    message: '文生图必须提供提示词',
+  .refine((data) => data.userPrompt.length > 0, {
+    message: '提示词不能为空',
     path: ['userPrompt'],
   })
   .refine((data) => data.type !== 'image_to_image' || data.originalImageUrls.length > 0, {

@@ -9,13 +9,12 @@ import {
   Download,
   History,
   LayoutDashboard,
-  Loader2,
   TrendingDown,
   TrendingUp,
   Wallet,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { toast } from 'sonner'
 
 import {
@@ -33,7 +32,6 @@ import {
   DialogContent,
   DialogTitle,
 } from '@/components/animate-ui/components/radix/dialog'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -45,6 +43,33 @@ import { cn } from '@/lib/utils'
 import { AlipayModal } from './alipay-modal'
 import { RechargeMethods } from './recharge-methods'
 import { WeChatPayModal } from './wechat-pay-modal'
+
+/** ===== 动画配置 ===== */
+
+const ANIMATION_CONFIG = {
+  duration: {
+    fast: 0.2,
+    normal: 0.3,
+    slow: 0.4,
+  },
+  delay: {
+    small: 0.05,
+    medium: 0.1,
+    large: 0.15,
+    xLarge: 0.2,
+  },
+  easing: {
+    smooth: 'easeOut',
+    bounce: [0.68, -0.55, 0.265, 1.55],
+  },
+  spring: {
+    stiffness: 300,
+    damping: 30,
+  },
+  stagger: {
+    listItem: 0.05,
+  },
+} as const
 
 /** ===== 类型定义 ===== */
 
@@ -138,7 +163,10 @@ function BalanceCard({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
+      transition={{
+        duration: ANIMATION_CONFIG.duration.slow,
+        ease: ANIMATION_CONFIG.easing.smooth
+      }}
       className="md:col-span-1 rounded-2xl bg-[#1A1F2E] p-6 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between h-[180px]"
     >
       <div className="absolute right-[-20px] top-[-20px] opacity-[0.03] group-hover:opacity-[0.06] transition-all duration-500 rotate-12">
@@ -157,7 +185,10 @@ function BalanceCard({
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ duration: 0.3 }}
+                transition={{
+                  duration: ANIMATION_CONFIG.duration.normal,
+                  ease: ANIMATION_CONFIG.easing.smooth
+                }}
                 className="text-4xl font-bold tracking-tight text-white"
               >
                 {formatCurrency(balance)}
@@ -181,16 +212,15 @@ function StatCard({
   description,
   icon: Icon,
   iconColor,
-  borderColor,
   isLoading,
   delay = 0
 }: {
   title: string
   amount: number
-  description: string
+  description?: string
   icon: React.ElementType
   iconColor: string
-  borderColor: string
+  borderColor?: string
   isLoading: boolean
   delay?: number
 }) {
@@ -198,37 +228,45 @@ function StatCard({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay }}
-      className={cn(
-        'rounded-2xl border bg-card p-6 flex flex-col justify-between shadow-sm h-[180px] hover:shadow-md transition-all duration-300',
-        borderColor
-      )}
+      transition={{
+        duration: ANIMATION_CONFIG.duration.slow,
+        delay,
+        ease: ANIMATION_CONFIG.easing.smooth
+      }}
+      className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-zinc-200 bg-white p-5 shadow-sm transition-all duration-300 hover:border-zinc-300 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
     >
       <div className="flex items-start justify-between">
-        <span className="text-sm font-medium text-muted-foreground">{title}</span>
-        <div className={cn('p-2 rounded-lg bg-opacity-10', iconColor.replace('text-', 'bg-').replace('500', '500/10').replace('600', '500/10'))}>
-          <Icon className={cn("w-4 h-4", iconColor.split(' ')[1])} />
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{title}</span>
+          <AnimatePresence mode="wait">
+            {isLoading ? (
+              <Skeleton className="h-8 w-24" />
+            ) : (
+              <motion.div
+                key={amount}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{
+                  duration: ANIMATION_CONFIG.duration.normal,
+                  ease: ANIMATION_CONFIG.easing.smooth
+                }}
+                className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
+              >
+                {formatCurrency(amount)}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className={cn('rounded-lg p-2 transition-colors duration-300 group-hover:bg-zinc-100 dark:group-hover:bg-zinc-800', iconColor.replace('text-', 'text-zinc-400 group-hover:text-'))}>
+          <Icon className="h-4 w-4" />
         </div>
       </div>
-      <div>
-        <AnimatePresence mode="wait">
-          {isLoading ? (
-            <Skeleton className="h-8 w-24 mb-2" />
-          ) : (
-            <motion.div
-              key={amount}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              transition={{ duration: 0.3 }}
-              className="text-3xl font-bold text-foreground tracking-tight"
-            >
-              {formatCurrency(amount)}
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <p className="text-xs text-muted-foreground mt-2">{description}</p>
-      </div>
+      {description && (
+        <div className="mt-4">
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">{description}</p>
+        </div>
+      )}
     </motion.div>
   )
 }
@@ -245,15 +283,32 @@ function TrendChart({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay: 0.2 }}
-      className="rounded-2xl border bg-card p-6 shadow-sm"
+      transition={{
+        duration: ANIMATION_CONFIG.duration.slow,
+        delay: ANIMATION_CONFIG.delay.xLarge,
+        ease: ANIMATION_CONFIG.easing.smooth
+      }}
+      className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
     >
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-8 flex items-center justify-between">
         <div className="space-y-1">
-          <h3 className="font-semibold text-base flex items-center gap-2">
-            <div className="w-1 h-4 bg-primary rounded-full" />
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
             收支趋势
           </h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            近30天消费与充值记录
+          </p>
+        </div>
+        {/* Legend */}
+        <div className="flex items-center gap-6 text-xs font-medium">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 rounded-full bg-zinc-900 dark:bg-zinc-100" />
+            <span className="text-zinc-600 dark:text-zinc-400">消费</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+            <span className="text-zinc-600 dark:text-zinc-400">充值</span>
+          </div>
         </div>
       </div>
 
@@ -265,9 +320,25 @@ function TrendChart({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="h-full w-full flex items-center justify-center"
+              transition={{ duration: ANIMATION_CONFIG.duration.fast }}
+              className="h-full w-full space-y-3"
             >
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              {/* 图表骨架屏 */}
+              <div className="flex items-end justify-between h-[250px] gap-2">
+                {[65, 45, 80, 55, 90, 70, 60, 85, 50, 75].map((height, i) => (
+                  <Skeleton
+                    key={i}
+                    className="flex-1 rounded-t"
+                    style={{ height: `${height}%` }}
+                  />
+                ))}
+              </div>
+              {/* X轴骨架 */}
+              <div className="flex justify-between">
+                {[...Array(5)].map((_, i) => (
+                  <Skeleton key={i} className="h-3 w-12" />
+                ))}
+              </div>
             </motion.div>
           ) : chartData.length > 0 ? (
             <motion.div
@@ -275,71 +346,92 @@ function TrendChart({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
+              transition={{
+                duration: ANIMATION_CONFIG.duration.normal,
+                ease: ANIMATION_CONFIG.easing.smooth
+              }}
               className="h-full w-full"
             >
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <AreaChart
+                  data={chartData}
+                  margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                >
                   <defs>
                     <linearGradient id="colorConsumption" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.1} />
-                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      <stop offset="5%" stopColor="currentColor" className="text-zinc-900 dark:text-zinc-100" stopOpacity={0.1} />
+                      <stop offset="95%" stopColor="currentColor" className="text-zinc-900 dark:text-zinc-100" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorRecharge" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="currentColor" className="text-zinc-300 dark:text-zinc-700" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="currentColor" className="text-zinc-300 dark:text-zinc-700" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.3} />
+                  <CartesianGrid
+                    strokeDasharray="4 4"
+                    vertical={false}
+                    stroke="currentColor"
+                    className="text-zinc-100 dark:text-zinc-800/50"
+                  />
                   <XAxis
                     dataKey="date"
                     tickLine={false}
                     axisLine={false}
                     tickMargin={15}
-                    fontSize={12}
+                    fontSize={11}
                     tickFormatter={(value) => {
                       const date = new Date(value)
                       return `${date.getMonth() + 1}/${date.getDate()}`
                     }}
-                    stroke="hsl(var(--muted-foreground))"
+                    stroke="currentColor"
+                    className="text-zinc-400 font-medium"
                   />
                   <YAxis
                     tickLine={false}
                     axisLine={false}
                     tickMargin={15}
-                    fontSize={12}
+                    fontSize={11}
                     tickFormatter={(value) => `¥${value}`}
-                    stroke="hsl(var(--muted-foreground))"
+                    stroke="currentColor"
+                    className="text-zinc-400 font-medium"
                   />
                   <RechartsTooltip
                     contentStyle={{
-                      backgroundColor: 'hsl(var(--popover))',
-                      borderColor: 'hsl(var(--border))',
-                      borderRadius: '12px',
-                      boxShadow: '0 8px 20px rgba(0,0,0,0.1)',
-                      padding: '12px'
+                      backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                      borderColor: 'rgba(228, 228, 231, 0.8)',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 12px -2px rgba(0, 0, 0, 0.05)',
+                      padding: '8px 12px',
+                      backdropFilter: 'blur(8px)',
                     }}
-                    itemStyle={{ fontSize: '12px', fontWeight: 500 }}
-                    labelStyle={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))', marginBottom: '8px' }}
+                    itemStyle={{ fontSize: '12px', fontWeight: 600 }}
+                    labelStyle={{ fontSize: '11px', color: '#71717a', marginBottom: '4px', fontWeight: 500 }}
                     labelFormatter={(value) => new Date(value).toLocaleDateString()}
-                    cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
+                    cursor={{ stroke: '#a1a1aa', strokeWidth: 1, strokeDasharray: '4 4' }}
                   />
-                  <Line
+                  <Area
                     name="消费"
                     type="monotone"
                     dataKey="consumption"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth={3}
-                    dot={false}
-                    activeDot={{ r: 6, strokeWidth: 0, fill: 'hsl(var(--primary))' }}
+                    stroke="currentColor"
+                    className="text-zinc-900 dark:text-zinc-100"
+                    strokeWidth={2}
+                    fillOpacity={1}
                     fill="url(#colorConsumption)"
+                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff', className: 'fill-zinc-900 dark:fill-zinc-100' }}
                   />
-                  <Line
+                  <Area
                     name="充值"
                     type="monotone"
                     dataKey="recharge"
-                    stroke="#10b981"
-                    strokeWidth={3}
-                    dot={false}
-                    activeDot={{ r: 6, strokeWidth: 0, fill: '#10b981' }}
+                    stroke="currentColor"
+                    className="text-zinc-300 dark:text-zinc-600"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#colorRecharge)"
+                    activeDot={{ r: 4, strokeWidth: 2, stroke: '#fff', className: 'fill-zinc-300 dark:fill-zinc-600' }}
                   />
-                </LineChart>
+                </AreaChart>
               </ResponsiveContainer>
             </motion.div>
           ) : (
@@ -348,7 +440,7 @@ function TrendChart({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="h-full flex flex-col items-center justify-center text-muted-foreground text-sm"
+              className="flex h-full flex-col items-center justify-center text-sm text-zinc-400"
             >
               <p>暂无趋势数据</p>
             </motion.div>
@@ -360,7 +452,15 @@ function TrendChart({
 }
 
 // 交易行组件
-function TransactionRow({ transaction: tx, detailed = false }: { transaction: Transaction; detailed?: boolean }) {
+function TransactionRow({
+  transaction: tx,
+  detailed = false,
+  index = 0
+}: {
+  transaction: Transaction
+  detailed?: boolean
+  index?: number
+}) {
   const categoryInfo = getCategoryInfo(tx.category)
   const Icon = categoryInfo.icon
   const isNegative = categoryInfo.color.includes('orange') || categoryInfo.color.includes('blue')
@@ -370,36 +470,38 @@ function TransactionRow({ transaction: tx, detailed = false }: { transaction: Tr
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
-      transition={{ duration: 0.3 }}
-      className="p-4 flex items-center justify-between hover:bg-muted/5 transition-colors group"
+      transition={{
+        duration: ANIMATION_CONFIG.duration.normal,
+        delay: index * ANIMATION_CONFIG.stagger.listItem,
+        ease: ANIMATION_CONFIG.easing.smooth
+      }}
+      className="group flex items-center justify-between p-4 transition-all hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
     >
       <div className="flex items-center gap-4">
         <div
           className={cn(
-            'w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-transform group-hover:scale-105',
-            categoryInfo.bg,
-            categoryInfo.color
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-100 bg-white text-zinc-500 shadow-sm transition-colors group-hover:border-zinc-200 group-hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:group-hover:text-zinc-100',
           )}
         >
-          <Icon className="w-5 h-5" />
+          <Icon className="h-4 w-4" />
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-foreground">{categoryInfo.label}</span>
+            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{categoryInfo.label}</span>
             {tx.taskId && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 h-5 font-mono bg-muted text-muted-foreground">
+              <span className="rounded-[4px] bg-zinc-100 px-1.5 py-0.5 font-mono text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
                 TASK-{tx.taskId}
-              </Badge>
+              </span>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs text-muted-foreground">
+          <div className="mt-1 flex items-center gap-2">
+            <span className="text-xs text-zinc-400 dark:text-zinc-500">
               {new Date(tx.createdAt).toLocaleString()}
             </span>
             {detailed && tx.metadata?.description && (
               <>
-                <span className="text-[10px] text-muted-foreground/50">•</span>
-                <span className="text-xs text-muted-foreground truncate max-w-[200px]">
+                <span className="text-[10px] text-zinc-300 dark:text-zinc-700">•</span>
+                <span className="max-w-[200px] truncate text-xs text-zinc-500 dark:text-zinc-400">
                   {tx.metadata.description}
                 </span>
               </>
@@ -410,14 +512,14 @@ function TransactionRow({ transaction: tx, detailed = false }: { transaction: Tr
       <div className="text-right">
         <div
           className={cn(
-            'font-semibold tabular-nums',
-            isNegative ? 'text-foreground' : 'text-emerald-600'
+            'font-medium tabular-nums',
+            isNegative ? 'text-zinc-900 dark:text-zinc-100' : 'text-emerald-600 dark:text-emerald-500'
           )}
         >
           {isNegative ? '-' : '+'}
           {formatCurrency(tx.amount)}
         </div>
-        <div className="text-xs text-muted-foreground mt-0.5">
+        <div className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
           余额 {formatCurrency(tx.balanceAfter)}
         </div>
       </div>
@@ -529,24 +631,22 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[900px] h-[85vh] p-0 gap-0 overflow-hidden bg-background/95 backdrop-blur-xl border-border/50 shadow-2xl flex flex-col">
+      <DialogContent className="flex h-[85vh] flex-col gap-0 overflow-hidden border-zinc-200 bg-zinc-50/95 p-0 shadow-2xl backdrop-blur-xl dark:border-zinc-800 dark:bg-zinc-950/95 sm:max-w-[900px]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
+        <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-              <Wallet className="w-5 h-5" />
-            </div>
-            <div>
-              <DialogTitle className="text-lg font-semibold">费用中心</DialogTitle>
-            </div>
+            <DialogTitle className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">费用中心</DialogTitle>
           </div>
-          <div className="flex items-center gap-2 mr-8">
+          <div className="mr-8 flex items-center gap-2">
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
                   size="sm"
-                  className={cn('h-9 text-xs font-normal', !dateRange && 'text-muted-foreground')}
+                  className={cn(
+                    'h-9 border-zinc-200 bg-white text-xs font-normal text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800',
+                    !dateRange && 'text-muted-foreground'
+                  )}
                 >
                   <CalendarIcon className="mr-2 h-3.5 w-3.5" />
                   {dateRange?.from ? (
@@ -576,21 +676,21 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col">
           {/* Tab Header with Animated Background */}
-          <div className="px-6 py-2 border-b bg-muted/5 shrink-0 flex items-center justify-between">
-            <div className="relative grid grid-cols-2 p-1 bg-muted/50 rounded-lg h-9 w-[280px]">
+          <div className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="relative grid h-9 w-[280px] grid-cols-2 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
               {/* Animated Tab Background */}
               <motion.div
-                className="absolute inset-1 bg-background rounded-md shadow-sm border"
+                className="absolute inset-1 rounded-md border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-700"
                 initial={false}
                 animate={{
                   x: activeTab === 'overview' ? '0%' : '100%',
                 }}
                 transition={{
                   type: 'spring',
-                  stiffness: 300,
-                  damping: 30,
+                  stiffness: ANIMATION_CONFIG.spring.stiffness,
+                  damping: ANIMATION_CONFIG.spring.damping,
                 }}
                 style={{
                   width: 'calc(50% - 4px)',
@@ -601,11 +701,11 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                 type="button"
                 onClick={() => setActiveTab('overview')}
                 className={cn(
-                  'relative z-10 flex items-center justify-center gap-2 text-xs font-medium rounded-md transition-colors duration-300',
-                  activeTab === 'overview' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                  'relative z-10 flex items-center justify-center gap-2 rounded-md text-xs font-medium transition-colors duration-300',
+                  activeTab === 'overview' ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
                 )}
               >
-                <LayoutDashboard className="w-3.5 h-3.5" />
+                <LayoutDashboard className="h-3.5 w-3.5" />
                 概览
               </button>
 
@@ -613,11 +713,11 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                 type="button"
                 onClick={() => setActiveTab('transactions')}
                 className={cn(
-                  'relative z-10 flex items-center justify-center gap-2 text-xs font-medium rounded-md transition-colors duration-300',
-                  activeTab === 'transactions' ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                  'relative z-10 flex items-center justify-center gap-2 rounded-md text-xs font-medium transition-colors duration-300',
+                  activeTab === 'transactions' ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
                 )}
               >
-                <History className="w-3.5 h-3.5" />
+                <History className="h-3.5 w-3.5" />
                 交易明细
               </button>
             </div>
@@ -628,10 +728,13 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -10 }}
-                  transition={{ duration: 0.2 }}
+                  transition={{
+                    duration: ANIMATION_CONFIG.duration.fast,
+                    ease: ANIMATION_CONFIG.easing.smooth
+                  }}
                 >
-                  <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground">
-                    <Download className="w-3.5 h-3.5 mr-2" />
+                  <Button variant="ghost" size="sm" className="h-8 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+                    <Download className="mr-2 h-3.5 w-3.5" />
                     导出记录
                   </Button>
                 </motion.div>
@@ -640,7 +743,7 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
           </div>
 
           {/* Tab Content with Animation */}
-          <div className="flex-1 overflow-hidden bg-muted/5 relative">
+          <div className="relative flex-1 overflow-hidden bg-zinc-50/50 dark:bg-zinc-950/50">
             <AnimatePresence mode="wait">
               {activeTab === 'overview' ? (
                 <motion.div
@@ -648,11 +751,14 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: 20 }}
-                  transition={{ duration: 0.3 }}
-                  className="h-full overflow-y-auto p-6 space-y-6 absolute inset-0"
+                  transition={{
+                    duration: ANIMATION_CONFIG.duration.normal,
+                    ease: ANIMATION_CONFIG.easing.smooth
+                  }}
+                  className="absolute inset-0 h-full overflow-y-auto p-6 space-y-6"
                 >
                   {/* Balance and Stats Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
                     <BalanceCard
                       balance={balance}
                       isLoading={isLoading}
@@ -663,20 +769,16 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                     <StatCard
                       title="本期支出"
                       amount={summary.totalConsumption}
-                      description="用于任务生成与分析"
                       icon={TrendingDown}
                       iconColor="text-orange-500"
-                      borderColor="border-border"
                       isLoading={isLoading}
                       delay={0.1}
                     />
                     <StatCard
                       title="本期充值"
                       amount={summary.totalRecharge}
-                      description="账户资金充入"
                       icon={TrendingUp}
                       iconColor="text-emerald-500"
-                      borderColor="border-border"
                       isLoading={isLoading}
                       delay={0.15}
                     />
@@ -689,34 +791,38 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 0.3 }}
+                    transition={{
+                      duration: ANIMATION_CONFIG.duration.slow,
+                      delay: ANIMATION_CONFIG.delay.large + ANIMATION_CONFIG.delay.large,
+                      ease: ANIMATION_CONFIG.easing.smooth
+                    }}
                     className="space-y-4"
                   >
                     <div className="flex items-center justify-between">
-                      <h3 className="font-semibold text-sm">最近交易</h3>
+                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">最近交易</h3>
                       <Button
                         variant="link"
-                        className="text-xs h-auto p-0"
+                        className="h-auto p-0 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
                         onClick={() => setActiveTab('transactions')}
                       >
                         查看全部
                       </Button>
                     </div>
-                    <div className="rounded-xl border bg-card overflow-hidden">
+                    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
                       <AnimatePresence mode="wait">
                         {isLoading ? (
-                          <div className="p-4 space-y-3">
+                          <div className="space-y-3 p-4">
                             <Skeleton className="h-12 w-full" />
                             <Skeleton className="h-12 w-full" />
                           </div>
                         ) : transactions.slice(0, 3).length > 0 ? (
-                          <div className="divide-y">
-                            {transactions.slice(0, 3).map((tx) => (
-                              <TransactionRow key={tx.id} transaction={tx} />
+                          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                            {transactions.slice(0, 3).map((tx, index) => (
+                              <TransactionRow key={tx.id} transaction={tx} index={index} />
                             ))}
                           </div>
                         ) : (
-                          <div className="p-8 text-center text-muted-foreground text-sm">
+                          <div className="p-8 text-center text-sm text-zinc-500">
                             暂无交易记录
                           </div>
                         )}
@@ -730,36 +836,64 @@ export function BillingModal({ open, onOpenChange }: BillingModalProps) {
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.3 }}
-                  className="h-full flex flex-col absolute inset-0"
+                  transition={{
+                    duration: ANIMATION_CONFIG.duration.normal,
+                    ease: ANIMATION_CONFIG.easing.smooth
+                  }}
+                  className="absolute inset-0 flex h-full flex-col"
                 >
                   <div className="flex-1 overflow-hidden">
                     <ScrollArea className="h-full">
                       <div className="p-6">
-                        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
+                        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
                           <AnimatePresence mode="wait">
                             {isLoading ? (
-                              <div className="p-6 space-y-4">
+                              <div className="space-y-4 p-6">
                                 {[...Array(8)].map((_, i) => (
                                   <Skeleton key={i} className="h-16 w-full" />
                                 ))}
                               </div>
                             ) : transactions.length > 0 ? (
-                              <div className="divide-y">
-                                {transactions.map((tx) => (
-                                  <TransactionRow key={tx.id} transaction={tx} detailed />
+                              <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                                {transactions.map((tx, index) => (
+                                  <TransactionRow key={tx.id} transaction={tx} detailed index={index} />
                                 ))}
                               </div>
                             ) : (
                               <motion.div
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                className="flex flex-col items-center justify-center py-16 text-muted-foreground"
+                                initial={{ opacity: 0, scale: 0.8, y: 20 }}
+                                animate={{
+                                  opacity: 1,
+                                  scale: 1,
+                                  y: 0
+                                }}
+                                transition={{
+                                  duration: ANIMATION_CONFIG.duration.slow,
+                                  ease: ANIMATION_CONFIG.easing.smooth
+                                }}
+                                className="flex flex-col items-center justify-center py-16 text-zinc-500"
                               >
-                                <div className="w-16 h-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
-                                  <History className="w-8 h-8 opacity-20" />
-                                </div>
-                                <p>暂无交易记录</p>
+                                <motion.div
+                                  animate={{
+                                    rotate: [0, 5, -5, 0],
+                                    scale: [1, 1.05, 1]
+                                  }}
+                                  transition={{
+                                    repeat: Infinity,
+                                    duration: 3,
+                                    ease: "easeInOut"
+                                  }}
+                                  className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800"
+                                >
+                                  <History className="h-8 w-8 opacity-20" />
+                                </motion.div>
+                                <motion.p
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 1 }}
+                                  transition={{ delay: 0.2 }}
+                                >
+                                  暂无交易记录
+                                </motion.p>
                               </motion.div>
                             )}
                           </AnimatePresence>
