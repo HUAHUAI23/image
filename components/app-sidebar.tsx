@@ -3,8 +3,8 @@
 import * as React from "react"
 import {
   Image as ImageIcon,
-  Sparkles
 } from "lucide-react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -32,15 +32,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild className="hover:bg-sidebar-accent/50 transition-colors duration-200">
               <Link href="/">
-                <div className="flex aspect-square size-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 text-white shadow-lg shadow-purple-500/20 ring-1 ring-white/20">
-                  <Sparkles className="size-5 fill-white/20" />
+                <div className="flex aspect-square size-10 items-center justify-center rounded-xl">
+                  <Image src="/icon.svg" alt="Lumina" width={32} height={32} className="size-8 rounded-lg" />
                 </div>
-                <div className="grid flex-1 text-left text-sm leading-tight ml-1">
+                <div className="flex-1 text-left text-sm leading-tight ml-1">
                   <span className="truncate font-bold text-base bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/70">
-                    ImageGen Pro
-                  </span>
-                  <span className="truncate text-xs font-medium text-muted-foreground/80">
-                    AI 创意工坊
+                    Lumina
                   </span>
                 </div>
               </Link>
