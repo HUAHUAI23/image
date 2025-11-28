@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { loginAction } from '@/app/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { FlickeringGrid } from '@/components/ui/flickering-grid'
+import { DominoGrid } from '@/components/ui/domino-grid'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -26,15 +26,14 @@ export default function LoginPage() {
     <div className="flex min-h-screen w-full items-center justify-center p-4 relative overflow-hidden bg-zinc-50 dark:bg-zinc-950">
       {/* Background Elements */}
       <div className="absolute inset-0 z-0">
-        <FlickeringGrid
+        <DominoGrid
           className="z-0 absolute inset-0 size-full"
-          squareSize={4}
-          gridGap={6}
-          color="#6B7280"
-          maxOpacity={0.5}
-          flickerChance={0.1}
-          height={800}
-          width={800}
+          squareSize={24}
+          gridGap={1}
+          color="#808080"
+          maxOpacity={0.3}
+          rippleSpeed={0.1}
+          rippleDuration={3000}
         />
       </div>
 
