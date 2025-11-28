@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { loginAction } from '@/app/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { FlickeringGrid } from '@/components/ui/flickering-grid'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -24,9 +25,18 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen w-full items-center justify-center p-4 relative overflow-hidden bg-zinc-50 dark:bg-zinc-950">
       {/* Background Elements */}
-      <div className="absolute inset-0 w-full h-full bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
-      <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-primary/20 opacity-20 blur-[100px]"></div>
-      <div className="absolute right-0 bottom-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-blue-500/20 opacity-20 blur-[100px]"></div>
+      <div className="absolute inset-0 z-0">
+        <FlickeringGrid
+          className="z-0 absolute inset-0 size-full"
+          squareSize={4}
+          gridGap={6}
+          color="#6B7280"
+          maxOpacity={0.5}
+          flickerChance={0.1}
+          height={800}
+          width={800}
+        />
+      </div>
 
       <div className="w-full max-w-[400px] space-y-6 relative z-10">
 
