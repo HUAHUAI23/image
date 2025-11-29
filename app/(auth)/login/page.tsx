@@ -2,12 +2,14 @@
 
 import { useActionState } from 'react'
 import { useEffect } from 'react'
-import { ArrowRight,GalleryVerticalEnd, Loader2 } from 'lucide-react'
+import { ArrowRight, Loader2 } from 'lucide-react'
+import Image from 'next/image'
 import { toast } from 'sonner'
 
 import { loginAction } from '@/app/actions/auth'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { DominoGrid } from '@/components/ui/domino-grid'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -23,24 +25,27 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen w-full items-center justify-center p-4 relative overflow-hidden bg-zinc-50 dark:bg-zinc-950">
       {/* Background Elements */}
-      <div className="absolute inset-0 w-full h-full bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
-      <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-primary/20 opacity-20 blur-[100px]"></div>
-      <div className="absolute right-0 bottom-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-blue-500/20 opacity-20 blur-[100px]"></div>
+      <div className="absolute inset-0 z-0">
+        <DominoGrid
+          className="z-0 absolute inset-0 size-full"
+          squareSize={24}
+          gridGap={1}
+          color="#808080"
+          maxOpacity={0.3}
+          rippleSpeed={0.1}
+          rippleDuration={3000}
+        />
+      </div>
 
       <div className="w-full max-w-[400px] space-y-6 relative z-10">
-        <div className="flex flex-col items-center justify-center gap-3 self-center mb-4">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg">
-            <GalleryVerticalEnd className="size-6" />
-          </div>
-          <span className="text-xl font-bold tracking-tight text-foreground">AI 创意工坊</span>
-        </div>
+
 
         <Card className="shadow-xl border bg-card">
-          <CardHeader className="space-y-1 text-center pb-6 pt-8">
-            <CardTitle className="text-xl font-bold tracking-tight">欢迎回来</CardTitle>
-            <CardDescription className="text-sm text-muted-foreground">
-              登录账户开启您的创作之旅
-            </CardDescription>
+          <CardHeader className="flex flex-col items-center justify-center gap-3 pb-6 pt-8">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl">
+              <Image src="/icon.svg" alt="Lumina" width={44} height={44} className="size-9 rounded-lg" />
+            </div>
+            <CardTitle className="text-xl font-bold tracking-tight">Lumina</CardTitle>
           </CardHeader>
           <form action={action}>
             <CardContent className="grid gap-5 px-8">

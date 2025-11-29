@@ -87,10 +87,16 @@ export async function POST(request: NextRequest) {
         await tx.insert(transactions).values({
           accountId: account.id,
           taskId: null, // No task associated with analysis
+          category: 'analysis_charge',
           amount: analysisPrice,
-          type: 'charge',
+          paymentMethod: 'balance',
           balanceBefore: account.balance,
           balanceAfter: newBalance,
+          metadata: {
+            description: 'VLM 图片分析',
+            analysisType: 'vlm',
+            imageUrl: imageUrl,
+          },
         })
       })
 

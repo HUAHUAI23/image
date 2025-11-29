@@ -7,18 +7,19 @@ services:
     container_name: image-generation-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: image_generation
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${APP_DB_USER:-image_app}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
+      POSTGRES_DB: ${APP_DB_NAME:-image_generation}
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - postgres_wal:/var/lib/postgresql/data/pg_wal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h localhost"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   # Application (Next.js)
   app:
@@ -31,11 +32,11 @@ services:
       - "3000:3000"
     environment:
       # Database
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/image_generation
+      DATABASE_URL: postgresql://${APP_DB_USER}:${APP_DB_PASSWORD}@postgres:5432/${APP_DB_NAME}
 
       # Auth
-      AUTH_SECRET: your-secret-key-change-in-production
-      NODE_ENV: production
+      AUTH_SECRET: ${AUTH_SECRET}
+      NODE_ENV: ${NODE_ENV:-production}
 
       # Volcengine TOS
       VOLCENGINE_ACCESS_KEY: ${VOLCENGINE_ACCESS_KEY}
@@ -57,12 +58,38 @@ services:
 
       # Queue & Cron
       QUEUE_CONCURRENCY: ${QUEUE_CONCURRENCY:-5}
-      CRON_BATCH_SIZE: ${CRON_BATCH_SIZE:-10}
-      TASK_TIMEOUT_MINUTES: ${TASK_TIMEOUT_MINUTES:-30}
+
+      CRON_TASK_ENQUEUE_ENABLED: ${CRON_TASK_ENQUEUE_ENABLED:-true}
+      CRON_TASK_ENQUEUE_INTERVAL: ${CRON_TASK_ENQUEUE_INTERVAL}
+      CRON_TASK_ENQUEUE_BATCH_SIZE: ${CRON_TASK_ENQUEUE_BATCH_SIZE:-20}
+
+      CRON_TASK_TIMEOUT_ENABLED: ${CRON_TASK_TIMEOUT_ENABLED:-true}
+      CRON_TASK_TIMEOUT_INTERVAL: ${CRON_TASK_TIMEOUT_INTERVAL}
+      CRON_TASK_TIMEOUT_MINUTES: ${CRON_TASK_TIMEOUT_MINUTES:-10}
+
+      CRON_ORDER_CLOSE_ENABLED: ${CRON_ORDER_CLOSE_ENABLED:-true}
+      CRON_ORDER_CLOSE_INTERVAL: ${CRON_ORDER_CLOSE_INTERVAL}
+      CRON_ORDER_CLOSE_BATCH_SIZE: ${CRON_ORDER_CLOSE_BATCH_SIZE:-50}
 
       # Other
       GIFT_AMOUNT: ${GIFT_AMOUNT:-0}
       ANALYSIS_PRICE: ${ANALYSIS_PRICE:-0}
+
+      # WeChat Pay (optional)
+      WECHAT_PAY_APPID: ${WECHAT_PAY_APPID}
+      WECHAT_PAY_MCHID: ${WECHAT_PAY_MCHID}
+      WECHAT_PAY_API_V3_KEY: ${WECHAT_PAY_API_V3_KEY}
+      WECHAT_PAY_SERIAL_NO: ${WECHAT_PAY_SERIAL_NO}
+      WECHAT_PAY_PRIVATE_KEY: ${WECHAT_PAY_PRIVATE_KEY}
+      WECHAT_PAY_NOTIFY_URL: ${WECHAT_PAY_NOTIFY_URL}
+      WECHAT_PAY_PLATFORM_CERT: ${WECHAT_PAY_PLATFORM_CERT}
+      WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: ${WECHAT_PAY_PLATFORM_CERT_SERIAL_NO}
+
+      # Alipay (optional)
+      ALIPAY_APPID: ${ALIPAY_APPID}
+      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY}
+      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY}
+      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL}
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,4 +102,6 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  postgres_wal:
     driver: local

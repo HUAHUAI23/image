@@ -1,33 +1,34 @@
-'use client';
+'use client'
 
-import { useEffect, useState } from 'react';
-import { PhotoProvider, PhotoView } from 'react-photo-view';
-import { Check, CheckCircle2, CheckSquare, Download, Image as ImageIcon, X } from 'lucide-react';
-import Image from 'next/image';
-import { toast } from 'sonner';
+import { useEffect, useState } from 'react'
+import { PhotoProvider, PhotoView } from 'react-photo-view'
+import { Check, CheckCircle2, CheckSquare, Download, Image as ImageIcon, X } from 'lucide-react'
+import Image from 'next/image'
+import { toast } from 'sonner'
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   GalleryDialog,
   GalleryDialogContent,
   GalleryDialogTitle,
-} from '@/components/ui/gallery-dialog';
-import { Separator } from '@/components/ui/separator';
-import { batchDownloadAsZip, DownloadProgress, downloadSingleImage } from '@/lib/batch-download';
-import { DEFAULT_IMAGE_PROCESS_CONFIG, ImageProcessConfig } from '@/lib/image-process';
-import { cn } from '@/lib/utils';
+} from '@/components/ui/gallery-dialog'
+import { Separator } from '@/components/ui/separator'
+import { batchDownloadAsZip, DownloadProgress, downloadSingleImage } from '@/lib/batch-download'
+import { DEFAULT_IMAGE_PROCESS_CONFIG, ImageProcessConfig } from '@/lib/image-process'
+import { cn } from '@/lib/utils'
 
-import { DownloadConfigSheet } from './image-gallery-modal/download-config-sheet';
+import { DownloadConfigSheet } from './image-gallery-modal/download-config-sheet'
 
-import 'react-photo-view/dist/react-photo-view.css';
+import 'react-photo-view/dist/react-photo-view.css'
 
 interface ImageGalleryModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  images: string[];
-  taskName: string;
-  taskId: number;
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  images: string[]
+  taskName: string
+  taskId: number
+  triggerRect?: DOMRect | null
 }
 
 export function ImageGalleryModal({
@@ -36,66 +37,67 @@ export function ImageGalleryModal({
   images,
   taskName,
   taskId,
+  triggerRect,
 }: ImageGalleryModalProps) {
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
-  const [showConfig, setShowConfig] = useState(false);
-  const [config, setConfig] = useState<ImageProcessConfig>(DEFAULT_IMAGE_PROCESS_CONFIG);
-  const [downloading, setDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
-  const [photoViewVisible, setPhotoViewVisible] = useState(false);
+  const [isSelectionMode, setIsSelectionMode] = useState(false)
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
+  const [showConfig, setShowConfig] = useState(false)
+  const [config, setConfig] = useState<ImageProcessConfig>(DEFAULT_IMAGE_PROCESS_CONFIG)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null)
+  const [photoViewVisible, setPhotoViewVisible] = useState(false)
 
   // Reset selection mode when dialog closes
   useEffect(() => {
     if (!open) {
-      setIsSelectionMode(false);
-      setSelectedIndices(new Set());
+      setIsSelectionMode(false)
+      setSelectedIndices(new Set())
     }
-  }, [open]);
+  }, [open])
 
   const handleDialogOpenChange = (nextOpen: boolean) => {
     if (!nextOpen && photoViewVisible) {
-      return;
+      return
     }
-    onOpenChange(nextOpen);
-  };
+    onOpenChange(nextOpen)
+  }
 
   const toggleSelection = (index: number) => {
-    const newSelection = new Set(selectedIndices);
+    const newSelection = new Set(selectedIndices)
     if (newSelection.has(index)) {
-      newSelection.delete(index);
+      newSelection.delete(index)
     } else {
-      newSelection.add(index);
+      newSelection.add(index)
     }
-    setSelectedIndices(newSelection);
-  };
+    setSelectedIndices(newSelection)
+  }
 
   const toggleSelectAll = () => {
     if (selectedIndices.size === images.length) {
-      setSelectedIndices(new Set());
+      setSelectedIndices(new Set())
     } else {
-      setSelectedIndices(new Set(images.map((_, i) => i)));
+      setSelectedIndices(new Set(images.map((_, i) => i)))
     }
-  };
+  }
 
   const handleSingleDownload = async (url: string, index: number) => {
     try {
-      await downloadSingleImage(url, index, taskId);
-      toast.success('图片下载成功');
+      await downloadSingleImage(url, index, taskId)
+      toast.success('图片下载成功')
     } catch (error) {
-      console.error('Download failed:', error);
-      toast.error('下载失败，请稍后重试');
+      console.error('Download failed:', error)
+      toast.error('下载失败，请稍后重试')
     }
-  };
+  }
 
   const handleBatchDownload = async () => {
     if (selectedIndices.size === 0) {
-      toast.error('请先选择要下载的图片');
-      return;
+      toast.error('请先选择要下载的图片')
+      return
     }
 
-    setDownloading(true);
-    setDownloadProgress(null);
+    setDownloading(true)
+    setDownloadProgress(null)
 
     try {
       const result = await batchDownloadAsZip(
@@ -105,62 +107,84 @@ export function ImageGalleryModal({
         taskId,
         taskName,
         (progress) => setDownloadProgress(progress)
-      );
+      )
 
       if (result.failCount === 0) {
-        toast.success(`成功下载 ${result.successCount} 张图片`);
+        toast.success(`成功下载 ${result.successCount} 张图片`)
       } else {
-        toast.warning(`成功 ${result.successCount} 张，失败 ${result.failCount} 张`);
+        toast.warning(`成功 ${result.successCount} 张，失败 ${result.failCount} 张`)
       }
 
-      setShowConfig(false);
-      setIsSelectionMode(false);
-      setSelectedIndices(new Set());
+      setShowConfig(false)
+      setIsSelectionMode(false)
+      setSelectedIndices(new Set())
     } catch (error) {
-      console.error('Batch download failed:', error);
-      toast.error('批量下载失败，请稍后重试');
+      console.error('Batch download failed:', error)
+      toast.error('批量下载失败，请稍后重试')
     } finally {
-      setDownloading(false);
-      setDownloadProgress(null);
+      setDownloading(false)
+      setDownloadProgress(null)
     }
-  };
+  }
 
   const resetConfig = () => {
-    setConfig(DEFAULT_IMAGE_PROCESS_CONFIG);
-  };
+    setConfig(DEFAULT_IMAGE_PROCESS_CONFIG)
+  }
 
   return (
     <>
-      <GalleryDialog open={open} onOpenChange={handleDialogOpenChange} modal={!photoViewVisible}>
+      <GalleryDialog
+        open={open}
+        onOpenChange={handleDialogOpenChange}
+        modal={!photoViewVisible}
+        triggerRect={triggerRect}
+        overlayColor="bg-black/40"
+        overlayBlur="false"
+      >
         <GalleryDialogContent
           showCloseButton={false}
-          className="sm:max-w-[1200px] h-[85vh] p-0 gap-0 overflow-hidden flex flex-col bg-background/95 shadow-2xl border-none ring-1 ring-white/10 backdrop-blur-xl"
+          className="sm:max-w-[1200px] h-[85vh] p-0 gap-0 overflow-hidden flex flex-col bg-background shadow-2xl border-none ring-1 ring-white/10"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0 bg-background/60 backdrop-blur-md z-10">
+          {/* Header - Removed blur, used solid background for better layering */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border/10 shrink-0 bg-background z-10">
             <GalleryDialogTitle className="text-lg font-semibold flex items-center gap-3">
-              <span className="truncate max-w-[300px] md:max-w-[500px]">{taskName}</span>
-              <Badge variant="outline" className="font-normal text-muted-foreground">
+              <span className="truncate max-w-[200px] sm:max-w-[300px] md:max-w-[500px] text-foreground/90">
+                {taskName}
+              </span>
+              <Badge
+                variant="secondary"
+                className="font-normal text-muted-foreground bg-secondary/50 border-secondary-foreground/10"
+              >
                 {images.length} 张图片
               </Badge>
             </GalleryDialogTitle>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               {images.length > 0 && (
-                <>
+                <div className="flex items-center">
                   {isSelectionMode ? (
-                    <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4 duration-200">
-                      <Button variant="ghost" size="sm" onClick={() => setIsSelectionMode(false)}>
+                    <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4 duration-300 ease-out">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsSelectionMode(false)}
+                        className="text-foreground hover:bg-muted"
+                      >
                         取消
                       </Button>
-                      <Separator orientation="vertical" className="h-4" />
-                      <Button variant="ghost" size="sm" onClick={toggleSelectAll}>
+                      <Separator orientation="vertical" className="h-4 bg-border/50" />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={toggleSelectAll}
+                        className="text-foreground hover:bg-muted"
+                      >
                         {selectedIndices.size === images.length ? '取消全选' : '全选'}
                       </Button>
                       <Button
                         variant="default"
                         size="sm"
-                        className="gap-2 min-w-[100px]"
+                        className="gap-2 min-w-[100px] shadow-lg shadow-primary/20"
                         disabled={selectedIndices.size === 0}
                         onClick={() => setShowConfig(true)}
                       >
@@ -170,24 +194,24 @@ export function ImageGalleryModal({
                     </div>
                   ) : (
                     <Button
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
-                      className="gap-2"
+                      className="gap-2 bg-secondary/50 hover:bg-secondary/80 border border-transparent hover:border-border/50 transition-all duration-300"
                       onClick={() => setIsSelectionMode(true)}
                     >
                       <CheckSquare className="w-4 h-4" />
-                      批量管理
+                      <span className="hidden sm:inline">批量管理</span>
                     </Button>
                   )}
-                </>
+                </div>
               )}
 
-              <div className="w-px h-4 bg-border mx-1" />
+              <div className="w-px h-4 bg-border/50 mx-1" />
 
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 rounded-full hover:bg-muted"
+                className="h-8 w-8 rounded-full hover:bg-muted/80 hover:rotate-90 transition-all duration-300"
                 onClick={() => onOpenChange(false)}
               >
                 <X className="w-4 h-4" />
@@ -196,14 +220,14 @@ export function ImageGalleryModal({
             </div>
           </div>
 
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto bg-muted/5 p-6 md:p-10 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+          {/* Content - Removed blur, adjusted background */}
+          <div className="flex-1 overflow-y-auto bg-muted/30 p-4 sm:p-6 md:p-10 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
             {images.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-4">
-                <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
-                  <ImageIcon className="w-8 h-8 opacity-50" />
+              <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-4 animate-in fade-in zoom-in-95 duration-500">
+                <div className="w-20 h-20 rounded-3xl bg-muted/50 flex items-center justify-center ring-1 ring-border/50">
+                  <ImageIcon className="w-10 h-10 opacity-40" />
                 </div>
-                <p>暂无图片预览</p>
+                <p className="text-lg font-medium opacity-60">暂无图片预览</p>
               </div>
             ) : (
               <PhotoProvider
@@ -216,22 +240,22 @@ export function ImageGalleryModal({
                     : 'cubic-bezier(0.34, 1.56, 0.64, 1)'
                 }
               >
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-6 md:gap-8 max-w-7xl mx-auto">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-4 sm:gap-6 max-w-[1600px] mx-auto">
                   {images.map((imageUrl, index) => {
-                    const isSelected = selectedIndices.has(index);
+                    const isSelected = selectedIndices.has(index)
                     return (
                       <div
                         key={index}
                         className={cn(
-                          'group relative aspect-square rounded-2xl overflow-hidden border bg-background transition-all duration-500 select-none',
+                          'group relative aspect-square rounded-xl overflow-hidden border bg-background transition-all duration-300 select-none',
                           isSelectionMode && isSelected
-                            ? 'ring-4 ring-primary/20 border-primary shadow-xl scale-[0.98]'
-                            : 'border-border/40 hover:border-border/80 hover:shadow-2xl hover:-translate-y-1',
+                            ? 'ring-2 ring-primary border-primary shadow-lg scale-[0.98]'
+                            : 'border-border/40 hover:border-border/80 hover:shadow-xl hover:-translate-y-1',
                           isSelectionMode && 'cursor-pointer active:scale-95'
                         )}
                         onClick={() => {
                           if (isSelectionMode) {
-                            toggleSelection(index);
+                            toggleSelection(index)
                           }
                         }}
                       >
@@ -241,22 +265,22 @@ export function ImageGalleryModal({
                             <div
                               className={cn(
                                 'absolute inset-0 z-20 transition-colors duration-300',
-                                isSelected ? 'bg-primary/5' : 'group-hover:bg-black/5'
+                                isSelected ? 'bg-primary/10' : 'group-hover:bg-black/5'
                               )}
                             />
-                            <div className="absolute top-4 left-4 z-30">
+                            <div className="absolute top-3 left-3 z-30">
                               <div
                                 className={cn(
-                                  'w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 shadow-sm',
+                                  'w-6 h-6 rounded-full flex items-center justify-center transition-all duration-300 shadow-sm',
                                   isSelected
                                     ? 'bg-primary text-primary-foreground scale-100 shadow-primary/30'
                                     : 'bg-white/90 backdrop-blur-sm border border-black/10 scale-90 opacity-60 group-hover:opacity-100 group-hover:scale-100'
                                 )}
                               >
                                 {isSelected ? (
-                                  <Check className="w-5 h-5 stroke-3" />
+                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
                                 ) : (
-                                  <div className="w-5 h-5 rounded-full border-2 border-muted-foreground/30" />
+                                  <div className="w-3.5 h-3.5 rounded-full border-2 border-muted-foreground/30" />
                                 )}
                               </div>
                             </div>
@@ -265,29 +289,27 @@ export function ImageGalleryModal({
 
                         {/* Image Content */}
                         {isSelectionMode ? (
-                          // In selection mode, just an image, no PhotoView trigger (handled by parent click)
                           <div className="w-full h-full relative">
                             <Image
                               src={imageUrl}
                               alt={`${taskName} - 图片 ${index + 1}`}
                               fill
                               className={cn(
-                                'object-cover transition-transform duration-700 ease-out',
-                                isSelected ? 'scale-105' : 'group-hover:scale-105'
+                                'object-cover transition-transform duration-500 ease-out',
+                                isSelected ? 'scale-100' : 'group-hover:scale-105'
                               )}
-                              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                              sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 20vw"
                             />
                           </div>
                         ) : (
-                          // Default mode: PhotoView trigger
                           <PhotoView src={imageUrl}>
                             <div className="w-full h-full cursor-zoom-in relative">
                               <Image
                                 src={imageUrl}
                                 alt={`${taskName} - 图片 ${index + 1}`}
                                 fill
-                                className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"
-                                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                                className="object-cover transition-transform duration-500 ease-out group-hover:scale-110"
+                                sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 20vw"
                               />
                             </div>
                           </PhotoView>
@@ -295,32 +317,32 @@ export function ImageGalleryModal({
 
                         {/* Default Mode: Hover Actions */}
                         {!isSelectionMode && (
-                          <div className="absolute inset-0 pointer-events-none flex flex-col justify-end p-4 md:p-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
-                            <div className="absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent opacity-80" />
-                            <div className="flex items-center justify-between translate-y-4 group-hover:translate-y-0 transition-transform duration-500 ease-out relative z-20 pointer-events-auto">
+                          <div className="absolute inset-0 pointer-events-none flex flex-col justify-end p-3 sm:p-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                            <div className="flex items-center justify-between translate-y-2 group-hover:translate-y-0 transition-transform duration-300 ease-out relative z-20 pointer-events-auto">
                               <Badge
                                 variant="secondary"
-                                className="bg-white/20 text-white border-white/20 backdrop-blur-md h-8 px-3 font-medium shadow-sm"
+                                className="bg-black/40 text-white border-white/10 backdrop-blur-md h-6 px-2 text-xs font-medium shadow-sm"
                               >
                                 #{index + 1}
                               </Badge>
 
                               <Button
                                 size="icon"
-                                className="h-10 w-10 rounded-full bg-white text-black hover:bg-white hover:scale-110 shadow-lg transition-all duration-300"
+                                className="h-8 w-8 rounded-full bg-white text-black hover:bg-white/90 hover:scale-105 shadow-lg transition-all duration-300"
                                 onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSingleDownload(imageUrl, index);
+                                  e.stopPropagation()
+                                  handleSingleDownload(imageUrl, index)
                                 }}
                                 title="下载原图"
                               >
-                                <Download className="w-5 h-5" />
+                                <Download className="w-4 h-4" />
                               </Button>
                             </div>
                           </div>
                         )}
                       </div>
-                    );
+                    )
                   })}
                 </div>
               </PhotoProvider>
@@ -329,17 +351,17 @@ export function ImageGalleryModal({
 
           {/* Download Progress Overlay */}
           {downloading && downloadProgress && (
-            <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-300">
-              <div className="bg-card border border-border rounded-xl p-8 shadow-2xl max-w-md w-full mx-6 space-y-6">
-                <div className="text-center space-y-2">
-                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 text-primary mb-2">
+            <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-50 animate-in fade-in duration-300">
+              <div className="bg-card border border-border/50 rounded-2xl p-8 shadow-2xl max-w-md w-full mx-6 space-y-6 ring-1 ring-black/5">
+                <div className="text-center space-y-3">
+                  <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-primary/10 text-primary mb-2 ring-1 ring-primary/20">
                     {downloadProgress.stage === 'complete' ? (
-                      <CheckCircle2 className="w-6 h-6" />
+                      <CheckCircle2 className="w-7 h-7" />
                     ) : (
-                      <Download className="w-6 h-6 animate-bounce" />
+                      <Download className="w-7 h-7 animate-bounce" />
                     )}
                   </div>
-                  <h3 className="text-xl font-semibold tracking-tight">
+                  <h3 className="text-xl font-semibold tracking-tight text-foreground">
                     {downloadProgress.stage === 'downloading' && '正在下载图片...'}
                     {downloadProgress.stage === 'zipping' && '正在打包文件...'}
                     {downloadProgress.stage === 'complete' && '准备完成！'}
@@ -349,22 +371,22 @@ export function ImageGalleryModal({
                   </p>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div className="flex justify-between text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     <span>进度</span>
                     <span>
                       {Math.round((downloadProgress.current / downloadProgress.total) * 100)}%
                     </span>
                   </div>
-                  <div className="h-2 w-full bg-muted overflow-hidden rounded-full">
+                  <div className="h-2 w-full bg-muted/50 overflow-hidden rounded-full ring-1 ring-black/5">
                     <div
-                      className="h-full bg-primary transition-all duration-500 ease-out"
+                      className="h-full bg-primary transition-all duration-500 ease-out rounded-full"
                       style={{
                         width: `${(downloadProgress.current / downloadProgress.total) * 100}%`,
                       }}
                     />
                   </div>
-                  <p className="text-xs text-center text-muted-foreground pt-2 font-mono">
+                  <p className="text-xs text-center text-muted-foreground pt-1 font-mono truncate px-4">
                     {downloadProgress.filename}
                   </p>
                 </div>
@@ -386,5 +408,5 @@ export function ImageGalleryModal({
         onReset={resetConfig}
       />
     </>
-  );
+  )
 }

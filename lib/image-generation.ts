@@ -49,13 +49,13 @@ const CONFIG = {
 // ============================================================================
 
 export interface GenerateImagesOptions {
-  /** Original image URL (for image-to-image) */
-  originalImageUrl?: string
+  /** Original image URLs (for image-to-image or multi-image fusion) */
+  originalImageUrls?: string[]
   /** User custom prompt */
   userPrompt: string
   /** Template prompt with {{ prompt }} placeholder */
   templatePrompt?: string
-  /** Number of images to generate */
+  /** Number of batches to generate (each batch may produce multiple images in sequential mode) */
   imageCount?: number
   /** Image size (e.g., "1024x1024", "2048x2048", "2K", or "4K") */
   size?: string
@@ -71,16 +71,16 @@ export interface GenerateImagesOptions {
   }
   /** Whether to add watermark */
   watermark?: boolean
-  /** Timeout per image in seconds */
+  /** Timeout per batch in seconds */
   timeout?: number
   /** Maximum concurrent requests */
   concurrency?: number
 }
 
 export interface GeneratedImage {
-  /** Image URL returned by API */
-  url: string
-  /** Image index in batch */
+  /** Image URLs returned by API (single image or multiple in sequential mode) */
+  urls: string[]
+  /** Batch index */
   index: number
   /** Whether generation succeeded */
   success: boolean
@@ -267,22 +267,23 @@ function calculateRetryDelay(attempt: number): number {
 // ============================================================================
 
 /**
- * Generate a single image with timeout, retry, and error handling
+ * Generate a single batch (may produce single or multiple images in sequential mode)
  *
  * Features:
  * - AbortController for real timeout control
  * - Exponential backoff with jitter
  * - Smart retry (only retryable errors)
  * - Rate limiting via rateLimiter
+ * - Supports sequential mode (returns multiple images)
  *
  * @param prompt - Final rendered prompt
  * @param options - Generation options
- * @returns Generated image result
+ * @returns Generated batch result (may contain multiple images)
  */
 async function generateSingleImage(
   prompt: string,
   options: {
-    originalImageUrl?: string
+    originalImageUrls?: string[]
     size: string
     sequentialImageGeneration?: 'auto' | 'disabled'
     sequentialImageGenerationOptions?: { maxImages?: number }
@@ -294,7 +295,7 @@ async function generateSingleImage(
   }
 ): Promise<GeneratedImage> {
   const {
-    originalImageUrl,
+    originalImageUrls,
     size,
     sequentialImageGeneration,
     sequentialImageGenerationOptions,
@@ -308,7 +309,7 @@ async function generateSingleImage(
 
   for (let attempt = 1; attempt <= CONFIG.MAX_RETRIES; attempt++) {
     try {
-      logger.info(`Image ${index + 1}: Attempt ${attempt}/${CONFIG.MAX_RETRIES}`)
+      logger.info(`Batch ${index + 1}: Attempt ${attempt}/${CONFIG.MAX_RETRIES}`)
 
       // Wait for rate limiter token
       await rateLimiter.acquire()
@@ -327,11 +328,19 @@ async function generateSingleImage(
           watermark: watermark ?? false,
         }
 
-        // Add original image for image-to-image
-        if (originalImageUrl) {
-          requestBody.image = [originalImageUrl]
+        // Add original images for image-to-image or multi-image fusion
+        // 关键修复：单图传字符串，多图传数组
+        if (originalImageUrls && originalImageUrls.length > 0) {
+          if (originalImageUrls.length === 1) {
+            // 单图：传字符串
+            requestBody.image = originalImageUrls[0]
+          } else {
+            // 多图融合：传数组（也支持组图模式）
+            requestBody.image = originalImageUrls
+          }
         }
 
+        // 组图模式
         // Add sequential image generation settings
         if (sequentialImageGeneration) {
           requestBody.sequential_image_generation = sequentialImageGeneration
@@ -371,16 +380,20 @@ async function generateSingleImage(
         // Parse response
         const result: APIResponse = await response.json()
 
-        // Extract image URL
-        const imageUrl = result.data?.[0]?.url
-        if (!imageUrl) {
-          throw new Error('No image URL in response')
+        // 关键修复：提取所有图片 URL（组图模式下可能有多张）
+        const imageUrls =
+          result.data?.map((item) => item.url).filter((url): url is string => !!url) || []
+
+        if (imageUrls.length === 0) {
+          throw new Error('No image URLs in response')
         }
 
-        logger.info(`Image ${index + 1}: Generated successfully (attempt ${attempt})`)
+        logger.info(
+          `Batch ${index + 1}: Generated ${imageUrls.length} image(s) successfully (attempt ${attempt})`
+        )
 
         return {
-          url: imageUrl,
+          urls: imageUrls,
           index,
           success: true,
           attempts: attempt,
@@ -393,7 +406,7 @@ async function generateSingleImage(
       lastError = error instanceof Error ? error : new Error(String(error))
       logger.warn(
         { error: lastError, attempt, index: index + 1 },
-        `Image ${index + 1}: Attempt ${attempt} failed`
+        `Batch ${index + 1}: Attempt ${attempt} failed`
       )
 
       // Don't retry if it's the last attempt
@@ -403,20 +416,20 @@ async function generateSingleImage(
 
       // Don't retry if error is not retryable
       if (!isRetryableError(error)) {
-        logger.info(`Image ${index + 1}: Non-retryable error, aborting`)
+        logger.info(`Batch ${index + 1}: Non-retryable error, aborting`)
         break
       }
 
       // Wait before retry with exponential backoff + jitter
       const delay = calculateRetryDelay(attempt)
-      logger.info(`Image ${index + 1}: Retrying in ${delay}ms...`)
+      logger.info(`Batch ${index + 1}: Retrying in ${delay}ms...`)
       await new Promise((resolve) => setTimeout(resolve, delay))
     }
   }
 
   // All retries failed
   return {
-    url: '',
+    urls: [],
     index,
     success: false,
     error: lastError?.message || 'Unknown error',
@@ -459,24 +472,26 @@ async function parallelLimit<T>(tasks: Array<() => Promise<T>>, concurrency: num
 // ============================================================================
 
 /**
- * Generate multiple images with detailed error tracking
+ * Generate multiple batches with detailed error tracking
  *
  * This is the main entry point for image generation.
  *
  * Features:
  * - Concurrent generation with configurable limit
  * - Rate limiting to prevent 429 errors
- * - Per-image retry with exponential backoff
- * - Partial success support (some images fail, some succeed)
+ * - Per-batch retry with exponential backoff
+ * - Supports sequential mode (multiple images per batch)
+ * - Partial success support (some batches fail, some succeed)
  * - Detailed error tracking
  *
  * @example
  * const result = await generateImagesDetailed({
  *   userPrompt: "A cute cat",
- *   imageCount: 10,
- *   concurrency: 5
+ *   imageCount: 4,  // 4 batches
+ *   sequentialImageGeneration: 'auto',
+ *   sequentialImageGenerationOptions: { maxImages: 5 }  // up to 5 images per batch
  * })
- * console.log(`Generated ${result.successCount}/${result.totalRequested} images`)
+ * console.log(`Generated ${result.successCount} total images from ${imageCount} batches`)
  *
  * @param options - Generation options
  * @returns Detailed generation results including successes and failures
@@ -487,7 +502,7 @@ export async function generateImagesDetailed(
   const {
     userPrompt,
     templatePrompt,
-    originalImageUrl,
+    originalImageUrls,
     imageCount = CONFIG.DEFAULT_IMAGE_COUNT,
     size = CONFIG.DEFAULT_SIZE,
     sequentialImageGeneration = 'disabled',
@@ -498,8 +513,16 @@ export async function generateImagesDetailed(
     concurrency = env.SEEDREAM_CONCURRENCY,
   } = options
 
-  logger.info(`Starting generation: ${imageCount} images (concurrency: ${concurrency})`)
-  logger.info(`Sequential mode: ${sequentialImageGeneration}`)
+  const hasMultipleImages = originalImageUrls && originalImageUrls.length > 1
+  const isSequentialMode = sequentialImageGeneration === 'auto'
+  logger.info(
+    `Starting generation: ${imageCount} batches (concurrency: ${concurrency}, multi-image: ${hasMultipleImages}, sequential: ${isSequentialMode})`
+  )
+  if (hasMultipleImages && isSequentialMode) {
+    logger.info(
+      `Multi-image + Sequential mode: each batch may produce multiple images from multiple reference images`
+    )
+  }
 
   // Render final prompt from template
   const prompt = await renderPrompt(userPrompt, templatePrompt)
@@ -517,7 +540,7 @@ export async function generateImagesDetailed(
     { length: imageCount },
     (_, index) => () =>
       generateSingleImage(prompt, {
-        originalImageUrl,
+        originalImageUrls,
         size,
         sequentialImageGeneration,
         sequentialImageGenerationOptions,
@@ -532,28 +555,37 @@ export async function generateImagesDetailed(
   // Execute with concurrency control
   const results = await parallelLimit(tasks, concurrency)
 
-  // Separate successes and failures
-  const successfulResults = results.filter((r) => r.success)
-  const failedResults = results.filter((r) => !r.success)
+  // Flatten results: each batch may have produced multiple images
+  const successUrls: string[] = []
+  const failures: Array<{ index: number; error: string; attempts: number }> = []
 
-  const successUrls = successfulResults.map((r) => r.url)
-  const failures = failedResults.map((r) => ({
-    index: r.index,
-    error: r.error || 'Unknown error',
-    attempts: r.attempts || 0,
-  }))
+  results.forEach((result) => {
+    if (result.success && result.urls.length > 0) {
+      successUrls.push(...result.urls)
+    } else {
+      failures.push({
+        index: result.index,
+        error: result.error || 'Unknown error',
+        attempts: result.attempts || 0,
+      })
+    }
+  })
 
-  logger.info(`Completed: ${successfulResults.length}/${imageCount} images succeeded`)
+  const totalImagesGenerated = successUrls.length
+
+  logger.info(
+    `Completed: ${totalImagesGenerated} images generated from ${imageCount} batches (${results.filter((r) => r.success).length} successful batches)`
+  )
 
   if (failures.length > 0) {
-    logger.warn({ failures }, `${failures.length} images failed`)
+    logger.warn({ failures }, `${failures.length} batches failed`)
   }
 
   return {
     successUrls,
     failures,
-    totalRequested: imageCount,
-    successCount: successfulResults.length,
+    totalRequested: imageCount, // 批次数量
+    successCount: totalImagesGenerated, // 实际生成的图片数量
   }
 }
 
@@ -563,9 +595,9 @@ export async function generateImagesDetailed(
  * Convenience wrapper for text-to-image generation.
  *
  * @param userPrompt - Text prompt for image generation
- * @param imageCount - Number of images to generate
+ * @param imageCount - Number of batches to generate
  * @returns Array of generated image URLs
- * @throws Error if all images fail to generate
+ * @throws Error if all batches fail to generate
  */
 export async function generateFromText(userPrompt: string, imageCount?: number): Promise<string[]> {
   const result = await generateImagesDetailed({
@@ -581,18 +613,18 @@ export async function generateFromText(userPrompt: string, imageCount?: number):
 }
 
 /**
- * Generate images from image with prompt (image-to-image)
+ * Generate images from single or multiple original images
  *
- * Convenience wrapper for image-to-image generation.
+ * Convenience wrapper for image-to-image or multi-image fusion generation.
  *
- * @param originalImageUrl - URL of the original image
+ * @param originalImageUrls - URLs of the original image(s)
  * @param userPrompt - Text prompt for transformation
  * @param options - Optional template and image count
  * @returns Array of generated image URLs
- * @throws Error if all images fail to generate
+ * @throws Error if all batches fail to generate
  */
-export async function generateFromImage(
-  originalImageUrl: string,
+export async function generateFromImages(
+  originalImageUrls: string[],
   userPrompt: string,
   options?: {
     templatePrompt?: string
@@ -600,7 +632,7 @@ export async function generateFromImage(
   }
 ): Promise<string[]> {
   const result = await generateImagesDetailed({
-    originalImageUrl,
+    originalImageUrls,
     userPrompt,
     templatePrompt: options?.templatePrompt,
     imageCount: options?.imageCount,

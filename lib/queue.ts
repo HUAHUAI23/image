@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import type { queueAsPromised } from 'fastq'
 import fastq from 'fastq'
 
@@ -28,11 +28,11 @@ type TaskRecord = {
   status: string
   userPrompt: string | null
   templatePromptId: number | null
-  originalImageUrl: string | null
+  originalImageUrls: string[]
   imageNumber: number
   priceUnit: 'per_image' | 'per_token'
-  generationOptions: GenerationOptions | null // 兼容旧数据
-  expectedImageCount: number | null // 兼容旧数据
+  generationOptions: GenerationOptions
+  expectedImageCount: number
   actualImageCount: number
 }
 
@@ -70,7 +70,7 @@ async function validateAndLockTask(taskId: number): Promise<TaskRecord> {
       SELECT t.id, t.account_id as "accountId", a.user_id as "userId",
              t.name, t.type, t.status,
              t.user_prompt as "userPrompt", t.template_prompt_id as "templatePromptId",
-             t.original_image_url as "originalImageUrl", t.image_number as "imageNumber",
+             t.original_image_urls as "originalImageUrls", t.image_number as "imageNumber",
              t.price_unit as "priceUnit", t.generation_options as "generationOptions",
              t.expected_image_count as "expectedImageCount", t.actual_image_count as "actualImageCount"
       FROM tasks t
@@ -148,20 +148,17 @@ async function generateImages(
   taskRecord: TaskRecord,
   templateContent: string | undefined
 ): Promise<ImageGenerationResult> {
-  // Handle null generationOptions for legacy tasks
-  const opts = taskRecord.generationOptions || {
-    size: '2K',
-    sequentialImageGeneration: 'disabled',
-    watermark: false,
-  }
+  const opts = taskRecord.generationOptions
   const isSequentialMode = opts.sequentialImageGeneration === 'auto'
+  const hasMultipleImages = taskRecord.originalImageUrls.length > 1
 
   logger.info(
-    `Generating ${taskRecord.imageNumber} batches for task ${taskRecord.id} (sequential: ${isSequentialMode})`
+    `Generating ${taskRecord.imageNumber} batches for task ${taskRecord.id} (sequential: ${isSequentialMode}, multi-image: ${hasMultipleImages})`
   )
 
   const result = await generateImagesDetailed({
-    originalImageUrl: taskRecord.originalImageUrl || undefined,
+    originalImageUrls:
+      taskRecord.originalImageUrls.length > 0 ? taskRecord.originalImageUrls : undefined,
     userPrompt: taskRecord.userPrompt!,
     templatePrompt: templateContent,
     imageCount: taskRecord.imageNumber,
@@ -173,12 +170,12 @@ async function generateImages(
   })
 
   logger.info(
-    `Generated ${result.successCount}/${result.totalRequested} images for task ${taskRecord.id}`
+    `Generated ${result.successCount} total images from ${result.totalRequested} batches for task ${taskRecord.id}`
   )
 
   // If all generation failed, throw error
   if (result.successCount === 0) {
-    throw new Error(`All ${result.totalRequested} images failed to generate`)
+    throw new Error(`All ${result.totalRequested} batches failed to generate`)
   }
 
   return result
@@ -254,8 +251,7 @@ function determineFinalStatus(
 
 /**
  * Handle refund based on expected vs actual image count
- * New logic: refund = (expectedImageCount - actualImageCount) × pricePerImage
- * Falls back to old logic if expectedImageCount is null (legacy tasks)
+ * Refund = (expectedImageCount - actualImageCount) × pricePerImage
  * NOTE: This function must be called within a transaction context
  */
 async function handleRefundInTx(
@@ -263,9 +259,8 @@ async function handleRefundInTx(
   taskId: number,
   accountId: number,
   priceUnit: 'per_image' | 'per_token',
-  expectedImageCount: number | null,
-  actualImageCount: number,
-  totalRequestedImages: number // fallback for legacy tasks
+  expectedImageCount: number,
+  actualImageCount: number
 ) {
   // Only handle per_image for now
   if (priceUnit !== 'per_image') {
@@ -273,47 +268,29 @@ async function handleRefundInTx(
     return
   }
 
-  // Get original charge transaction
-  const txRecord = await tx.query.transactions.findFirst({
-    where: eq(transactions.taskId, taskId),
-  })
-
-  if (!txRecord || txRecord.type !== 'charge') {
-    logger.warn(`No charge transaction found for task ${taskId}`)
+  const overchargedCount = expectedImageCount - actualImageCount
+  if (overchargedCount <= 0) {
+    logger.info(`No refund needed for task ${taskId} (actual >= expected)`)
     return
   }
 
-  let refundAmount = 0
+  // Get original charge transaction
+  const txRecord = await tx.query.transactions.findFirst({
+    where: and(eq(transactions.taskId, taskId), eq(transactions.category, 'task_charge')),
+  })
 
-  // New logic: use expectedImageCount if available
-  if (expectedImageCount !== null && expectedImageCount !== undefined) {
-    const overchargedCount = expectedImageCount - actualImageCount
-    if (overchargedCount <= 0) {
-      logger.info(`No refund needed for task ${taskId} (actual >= expected)`)
-      return
-    }
-
-    // pricePerImage = totalCharged / expectedImageCount
-    const pricePerImage = Math.round(txRecord.amount / expectedImageCount)
-    refundAmount = overchargedCount * pricePerImage
-
-    logger.info(
-      `Calculating refund (new logic): (${expectedImageCount} expected - ${actualImageCount} actual) × ${pricePerImage} = ${refundAmount}`
-    )
-  } else {
-    // Legacy logic: use totalRequestedImages (for old tasks without expectedImageCount)
-    const failureCount = totalRequestedImages - actualImageCount
-    if (failureCount <= 0) {
-      logger.info(`No refund needed for task ${taskId} (legacy, no failures)`)
-      return
-    }
-
-    refundAmount = Math.round((txRecord.amount * failureCount) / totalRequestedImages)
-
-    logger.info(
-      `Calculating refund (legacy logic): ${failureCount} failed / ${totalRequestedImages} total = ${refundAmount}`
-    )
+  if (!txRecord) {
+    logger.warn(`No task_charge transaction found for task ${taskId}`)
+    return
   }
+
+  // pricePerImage = totalCharged / expectedImageCount
+  const pricePerImage = Math.round(txRecord.amount / expectedImageCount)
+  const refundAmount = overchargedCount * pricePerImage
+
+  logger.info(
+    `Calculating refund: (${expectedImageCount} expected - ${actualImageCount} actual) × ${pricePerImage} = ${refundAmount}`
+  )
 
   if (refundAmount <= 0) {
     return
@@ -336,10 +313,17 @@ async function handleRefundInTx(
   await tx.insert(transactions).values({
     accountId: account.id,
     taskId,
+    category: 'task_refund',
     amount: refundAmount,
-    type: 'refund',
+    paymentMethod: 'balance',
     balanceBefore: account.balance,
     balanceAfter: newBalance,
+    metadata: {
+      description: '任务退款',
+      expectedCount: expectedImageCount,
+      actualCount: actualImageCount,
+      refundReason: `实际生成 ${actualImageCount} 张，少于预期 ${expectedImageCount} 张`,
+    },
   })
 
   logger.info(`Refunded ${refundAmount} for task ${taskId}`)
@@ -354,15 +338,15 @@ async function handleFullRefundInTx(
   tx: any,
   taskId: number,
   accountId: number,
-  expectedImageCount?: number | null
+  expectedImageCount: number
 ) {
   // Get original charge transaction
   const txRecord = await tx.query.transactions.findFirst({
-    where: eq(transactions.taskId, taskId),
+    where: and(eq(transactions.taskId, taskId), eq(transactions.category, 'task_charge')),
   })
 
-  if (!txRecord || txRecord.type !== 'charge') {
-    logger.warn(`No charge transaction found for task ${taskId}`)
+  if (!txRecord) {
+    logger.warn(`No task_charge transaction found for task ${taskId}`)
     return
   }
 
@@ -383,14 +367,22 @@ async function handleFullRefundInTx(
   await tx.insert(transactions).values({
     accountId: account.id,
     taskId,
+    category: 'task_refund',
     amount: txRecord.amount,
-    type: 'refund',
+    paymentMethod: 'balance',
     balanceBefore: account.balance,
     balanceAfter: newBalance,
+    metadata: {
+      description: '任务全额退款',
+      expectedCount: expectedImageCount,
+      actualCount: 0,
+      refundReason: '任务完全失败，所有图片生成失败',
+    },
   })
 
-  const expectedInfo = expectedImageCount ? ` (expected ${expectedImageCount} images, got 0)` : ''
-  logger.info(`Full refund ${txRecord.amount} for task ${taskId}${expectedInfo}`)
+  logger.info(
+    `Full refund ${txRecord.amount} for task ${taskId} (expected ${expectedImageCount} images, got 0)`
+  )
 }
 
 // ==================== Task Failure Handling ====================
@@ -497,8 +489,7 @@ async function processTask(task: Task) {
         taskRecord.accountId,
         taskRecord.priceUnit,
         taskRecord.expectedImageCount,
-        finalSuccessCount,
-        taskRecord.imageNumber // fallback for legacy tasks
+        finalSuccessCount
       )
     })
 
