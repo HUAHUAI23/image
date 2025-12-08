@@ -27,5 +27,5 @@ if (env.NODE_ENV !== 'production') globalForDb.conn = conn
 // 在非生产环境启用 SQL 查询日志，方便调试
 export const db = drizzle(conn, {
   schema: { ...schema, ...relations },
-  logger: env.NODE_ENV !== 'production' ? drizzleLogger : undefined,
+  logger: env.DB_QUERY_LOGGING ? drizzleLogger : undefined,
 })
