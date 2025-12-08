@@ -74,17 +74,12 @@ export const env = createEnv({
    */
   client: {},
   /*
-   * Specify what values should be validated by your schemas above.
-   *
-   * If you're using Next.js < 13.4.4, you'll need to specify the runtimeEnv manually
-   * For Next.js >= 13.4.4, you can use the experimental__runtimeEnv option and
-   * only specify client-side variables.
+   * For Next.js >= 13.4.4, you can use experimental__runtimeEnv.
+   * Server-side env vars are automatically accessed from process.env
+   * Only client-side vars (NEXT_PUBLIC_*) need to be specified here
+   * Since we have no client-side vars, we set it to process.env to satisfy the library
    */
-  // runtimeEnv: {
-  //   DATABASE_URL: process.env.DATABASE_URL,
-  //   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-  // },
-  experimental__runtimeEnv: {},
+  experimental__runtimeEnv: process.env,
   /*
    * Skip validation during build time (e.g., in CI/CD)
    * Set SKIP_ENV_VALIDATION=1 to skip validation
