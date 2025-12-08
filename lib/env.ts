@@ -10,6 +10,7 @@ export const env = createEnv({
     DATABASE_URL: z.url(),
     AUTH_SECRET: z.string().min(1),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    DB_QUERY_LOGGING: z.coerce.boolean().default(false), // 数据库查询日志独立开关
 
     // Volcengine TOS (Object Storage)
     VOLCENGINE_ACCESS_KEY: z.string().min(1),
@@ -71,76 +72,19 @@ export const env = createEnv({
    *
    * 💡 You'll get type errors if these are not prefixed with NEXT_PUBLIC_.
    */
-  client: {
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().optional(),
-  },
+  client: {},
   /*
    * Specify what values should be validated by your schemas above.
    *
-   * For scripts and non-Next.js contexts, we need to specify runtimeEnv explicitly
-   * For Next.js contexts, experimental__runtimeEnv handles client-side variables
+   * If you're using Next.js < 13.4.4, you'll need to specify the runtimeEnv manually
+   * For Next.js >= 13.4.4, you can use the experimental__runtimeEnv option and
+   * only specify client-side variables.
    */
-  runtimeEnv: {
-    DATABASE_URL: process.env.DATABASE_URL,
-    AUTH_SECRET: process.env.AUTH_SECRET,
-    NODE_ENV: process.env.NODE_ENV,
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-
-    // Volcengine TOS
-    VOLCENGINE_ACCESS_KEY: process.env.VOLCENGINE_ACCESS_KEY,
-    VOLCENGINE_SECRET_KEY: process.env.VOLCENGINE_SECRET_KEY,
-    VOLCENGINE_REGION: process.env.VOLCENGINE_REGION,
-    VOLCENGINE_ENDPOINT: process.env.VOLCENGINE_ENDPOINT,
-    VOLCENGINE_BUCKET_NAME: process.env.VOLCENGINE_BUCKET_NAME,
-
-    // Doubao VLM
-    ARK_API_KEY: process.env.ARK_API_KEY,
-    ARK_BASE_URL: process.env.ARK_BASE_URL,
-    ARK_MODEL: process.env.ARK_MODEL,
-
-    // Seedream
-    SEEDREAM_API_KEY: process.env.SEEDREAM_API_KEY,
-    SEEDREAM_BASE_URL: process.env.SEEDREAM_BASE_URL,
-    SEEDREAM_MODEL: process.env.SEEDREAM_MODEL,
-    SEEDREAM_CONCURRENCY: process.env.SEEDREAM_CONCURRENCY,
-
-    // Queue
-    QUEUE_CONCURRENCY: process.env.QUEUE_CONCURRENCY,
-
-    // Task Enqueue Cron
-    CRON_TASK_ENQUEUE_ENABLED: process.env.CRON_TASK_ENQUEUE_ENABLED,
-    CRON_TASK_ENQUEUE_INTERVAL: process.env.CRON_TASK_ENQUEUE_INTERVAL,
-    CRON_TASK_ENQUEUE_BATCH_SIZE: process.env.CRON_TASK_ENQUEUE_BATCH_SIZE,
-
-    // Task Timeout Recovery Cron
-    CRON_TASK_TIMEOUT_ENABLED: process.env.CRON_TASK_TIMEOUT_ENABLED,
-    CRON_TASK_TIMEOUT_INTERVAL: process.env.CRON_TASK_TIMEOUT_INTERVAL,
-    CRON_TASK_TIMEOUT_MINUTES: process.env.CRON_TASK_TIMEOUT_MINUTES,
-
-    // Order Close Cron
-    CRON_ORDER_CLOSE_ENABLED: process.env.CRON_ORDER_CLOSE_ENABLED,
-    CRON_ORDER_CLOSE_INTERVAL: process.env.CRON_ORDER_CLOSE_INTERVAL,
-    CRON_ORDER_CLOSE_BATCH_SIZE: process.env.CRON_ORDER_CLOSE_BATCH_SIZE,
-
-    GIFT_AMOUNT: process.env.GIFT_AMOUNT,
-    ANALYSIS_PRICE: process.env.ANALYSIS_PRICE,
-
-    // WeChat Pay
-    WECHAT_PAY_APPID: process.env.WECHAT_PAY_APPID,
-    WECHAT_PAY_MCHID: process.env.WECHAT_PAY_MCHID,
-    WECHAT_PAY_API_V3_KEY: process.env.WECHAT_PAY_API_V3_KEY,
-    WECHAT_PAY_SERIAL_NO: process.env.WECHAT_PAY_SERIAL_NO,
-    WECHAT_PAY_PRIVATE_KEY: process.env.WECHAT_PAY_PRIVATE_KEY,
-    WECHAT_PAY_NOTIFY_URL: process.env.WECHAT_PAY_NOTIFY_URL,
-    WECHAT_PAY_PLATFORM_CERT: process.env.WECHAT_PAY_PLATFORM_CERT,
-    WECHAT_PAY_PLATFORM_CERT_SERIAL_NO: process.env.WECHAT_PAY_PLATFORM_CERT_SERIAL_NO,
-
-    // Alipay
-    ALIPAY_APPID: process.env.ALIPAY_APPID,
-    ALIPAY_PRIVATE_KEY: process.env.ALIPAY_PRIVATE_KEY,
-    ALIPAY_PUBLIC_KEY: process.env.ALIPAY_PUBLIC_KEY,
-    ALIPAY_NOTIFY_URL: process.env.ALIPAY_NOTIFY_URL,
-  },
+  // runtimeEnv: {
+  //   DATABASE_URL: process.env.DATABASE_URL,
+  //   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  // },
+  experimental__runtimeEnv: {},
   /*
    * Skip validation during build time (e.g., in CI/CD)
    * Set SKIP_ENV_VALIDATION=1 to skip validation
