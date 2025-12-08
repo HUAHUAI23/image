@@ -69,15 +69,15 @@
     "liquidjs": "^10.24.0",
     "lucide-react": "^0.554.0",
     "motion": "^12.23.24",
-    "next": "16.0.3",
+    "next": "16.0.7",
     "next-themes": "^0.4.6",
     "pg": "^8.16.3",
     "pino": "^10.1.0",
     "qrcode": "^1.5.4",
     "radix-ui": "^1.4.3",
-    "react": "19.2.0",
+    "react": "19.2.1",
     "react-day-picker": "^9.11.2",
-    "react-dom": "19.2.0",
+    "react-dom": "19.2.1",
     "react-hook-form": "^7.66.1",
     "react-photo-view": "^1.2.7",
     "react-resizable-panels": "^3.0.6",
@@ -95,11 +95,11 @@
     "@types/node": "^20",
     "@types/pg": "^8.15.6",
     "@types/qrcode": "^1.5.6",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
     "drizzle-kit": "^0.31.7",
     "eslint": "^9",
-    "eslint-config-next": "16.0.3",
+    "eslint-config-next": "16.0.7",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "tailwindcss": "^4",
@@ -114,7 +114,9 @@
   },
   "pnpm": {
     "overrides": {
-      "axios": ">=0.30.2"
+      "axios": ">=0.30.2",
+      "@types/react": "19.2.7",
+      "@types/react-dom": "19.2.3"
     }
   }
 }
