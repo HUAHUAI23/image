@@ -1,4 +1,4 @@
-import { jwtVerify,SignJWT } from 'jose'
+import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
 
 import { env } from './env'
@@ -42,9 +42,13 @@ export async function createSession(userId: number) {
   const session = await encrypt({ userId, expiresAt })
   const cookieStore = await cookies()
 
+  // In production, only use secure cookies if HTTPS is available
+  // For HTTP-only deployments (development/testing), allow insecure cookies
+  const isSecure = env.NODE_ENV === 'production' && env.FORCE_HTTPS
+
   cookieStore.set('session', session, {
     httpOnly: true,
-    secure: env.NODE_ENV === 'production',
+    secure: isSecure,
     expires: expiresAt,
     sameSite: 'lax',
     path: '/',
