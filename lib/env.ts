@@ -10,6 +10,11 @@ export const env = createEnv({
     DATABASE_URL: z.url(),
     AUTH_SECRET: z.string().min(1),
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    FORCE_HTTPS: z
+      .string()
+      .optional()
+      .default('false')
+      .transform((val) => val !== 'false'), // Allow 'false' to disable HTTPS requirement
     DB_QUERY_LOGGING: z.coerce.boolean().default(false), // 数据库查询日志独立开关
 
     // Volcengine TOS (Object Storage)
