@@ -2,11 +2,13 @@ import { Cron } from 'croner'
 import { sql } from 'drizzle-orm'
 
 import { db } from '@/db'
+import { paymentMethodEnum } from '@/db/schema'
 import { env } from '@/lib/env'
 import { logger as baseLogger } from '@/lib/logger'
 
+import { closeOrder as closeAlipayOrder, isAlipayEnabled } from './alipay'
 import { addToQueue } from './queue'
-import { closeOrder as closeWechatOrder } from './wechat-pay'
+import { closeOrder as closeWechatOrder, isWeChatPayEnabled } from './wechat-pay'
 
 const logger = baseLogger.child({ module: 'lib/cron' })
 
@@ -19,9 +21,13 @@ type TaskRow = {
   updated_at: Date
 }
 
+/** Payment provider type from schema */
+type PaymentProvider = (typeof paymentMethodEnum.enumValues)[number]
+
 type ExpiredOrderRow = {
   id: number
   out_trade_no: string
+  provider: PaymentProvider
   amount: number
   expire_time: Date
 }
@@ -158,14 +164,75 @@ const ORDER_CLOSE_CONFIG = {
 }
 
 /**
+ * Close order in payment provider
+ * Routes to the appropriate payment provider's close order API
+ *
+ * @param outTradeNo - Merchant order number
+ * @param provider - Payment provider (wechat/alipay/stripe/manual)
+ * @returns true if closed successfully or already closed, false if provider not enabled
+ */
+async function closeOrderInProvider(outTradeNo: string, provider: PaymentProvider): Promise<boolean> {
+  switch (provider) {
+    case 'wechat':
+      if (!isWeChatPayEnabled()) {
+        logger.warn(`[OrderClose] WeChat Pay not enabled, skipping: ${outTradeNo}`)
+        return false
+      }
+      try {
+        await closeWechatOrder(outTradeNo)
+        logger.info(`[OrderClose] Closed WeChat order: ${outTradeNo}`)
+      } catch (error: any) {
+        const errorMessage = error.message || ''
+        // These errors mean the order is already closed or doesn't exist
+        if (
+          errorMessage.includes('ORDER_CLOSED') ||
+          errorMessage.includes('ORDERNOTEXIST') ||
+          errorMessage.includes('ORDER_PAID')
+        ) {
+          logger.info(`[OrderClose] WeChat order already closed or not exists: ${outTradeNo}`)
+        } else {
+          throw error
+        }
+      }
+      return true
+
+    case 'alipay':
+      if (!isAlipayEnabled()) {
+        logger.warn(`[OrderClose] Alipay not enabled, skipping: ${outTradeNo}`)
+        return false
+      }
+      // closeAlipayOrder already handles "already closed" cases internally
+      await closeAlipayOrder(outTradeNo)
+      logger.info(`[OrderClose] Closed Alipay order: ${outTradeNo}`)
+      return true
+
+    case 'stripe':
+      // TODO: Implement Stripe order close when needed
+      logger.info(`[OrderClose] Stripe order close not implemented, skipping: ${outTradeNo}`)
+      return true
+
+    case 'manual':
+      // Manual orders don't need external API calls
+      logger.info(`[OrderClose] Manual order, no external API needed: ${outTradeNo}`)
+      return true
+
+    default:
+      logger.warn(`[OrderClose] Unknown provider '${provider}', skipping: ${outTradeNo}`)
+      return false
+  }
+}
+
+/**
  * Close expired payment orders
  * This finds all pending orders that have passed their expiration time
- * and attempts to close them both in WeChat and locally
+ * and attempts to close them in the respective payment provider and locally
+ *
+ * Supports multiple payment providers: wechat, alipay, stripe, manual
  */
 async function closeExpiredOrders(): Promise<number> {
   const result = await db.transaction(async (tx) => {
     const { rows } = await tx.execute<ExpiredOrderRow>(sql`
-      SELECT id, out_trade_no, amount, expire_time
+      SELECT id, out_trade_no, provider, amount, expire_time
       FROM charge_orders
       WHERE status = 'pending'
         AND expire_time IS NOT NULL
@@ -187,21 +254,12 @@ async function closeExpiredOrders(): Promise<number> {
 
   for (const order of result) {
     try {
-      // Try to close order in WeChat
-      try {
-        await closeWechatOrder(order.out_trade_no)
-        logger.info(`[OrderClose] Closed WeChat order: ${order.out_trade_no}`)
-      } catch (error: any) {
-        // If WeChat returns already closed/paid/not exists, continue with local update
-        const errorMessage = error.message || ''
-        if (
-          !errorMessage.includes('ORDER_CLOSED') &&
-          !errorMessage.includes('ORDERNOTEXIST') &&
-          !errorMessage.includes('ORDER_PAID')
-        ) {
-          throw error
-        }
-        logger.info(`[OrderClose] WeChat order already closed or not exists: ${order.out_trade_no}`)
+      // Close order in payment provider (wechat/alipay/stripe/manual)
+      const closed = await closeOrderInProvider(order.out_trade_no, order.provider)
+
+      if (!closed) {
+        // Provider not enabled, skip this order for now
+        continue
       }
 
       // Update local status to closed
@@ -227,9 +285,14 @@ async function closeExpiredOrders(): Promise<number> {
       `)
 
       closedCount++
-      logger.info(`[OrderClose] Closed expired order: ${order.out_trade_no} (${order.amount / 100}元)`)
+      logger.info(
+        `[OrderClose] Closed expired ${order.provider} order: ${order.out_trade_no} (${order.amount / 100}元)`
+      )
     } catch (error) {
-      logger.error(error, `[OrderClose] Failed to close expired order: ${order.out_trade_no}`)
+      logger.error(
+        error,
+        `[OrderClose] Failed to close expired ${order.provider} order: ${order.out_trade_no}`
+      )
     }
   }
 

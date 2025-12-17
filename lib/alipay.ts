@@ -303,6 +303,75 @@ export async function cancelOrder(
 }
 
 /**
+ * 统一收单交易关闭
+ * 文档：https://opendocs.alipay.com/open/02o6e7
+ *
+ * 用于交易创建后，用户在一定时间内未进行支付，可调用该接口直接将未付款的交易进行关闭。
+ *
+ * 注意：
+ * - 只能关闭等待买家付款状态的订单
+ * - 订单关闭后用户无法继续支付
+ *
+ * @param outTradeNo 商户订单号
+ */
+export async function closeOrder(outTradeNo: string): Promise<void> {
+  checkAlipayConfig()
+
+  const sdk = getAlipaySDK()
+
+  try {
+    logger.info({ outTradeNo }, '开始关闭支付宝订单')
+
+    const result = await sdk.exec('alipay.trade.close', {
+      bizContent: {
+        out_trade_no: outTradeNo,
+      },
+    })
+
+    // 检查返回结果
+    if (result.code !== '10000') {
+      const subCode = result.subCode || ''
+
+      // 这些错误码表示订单已经不需要关闭（已关闭/不存在/已支付等）
+      const ignorableErrors = [
+        'ACQ.TRADE_NOT_EXIST', // 交易不存在
+        'ACQ.TRADE_STATUS_ERROR', // 交易状态不合法（已支付等）
+        'ACQ.REASON_TRADE_STATUS_INVALID', // 交易状态异常
+        'ACQ.REASON_ILLEGAL_STATUS', // 交易状态异常
+      ]
+
+      if (ignorableErrors.includes(subCode)) {
+        logger.info(
+          { outTradeNo, subCode, subMsg: result.subMsg },
+          '支付宝订单无需关闭（已关闭/不存在/状态不允许）'
+        )
+        return
+      }
+
+      logger.error(
+        {
+          code: result.code,
+          msg: result.msg,
+          subCode: result.subCode,
+          subMsg: result.subMsg,
+          outTradeNo,
+        },
+        '关闭支付宝订单失败'
+      )
+      throw new Error(`关闭订单失败: ${result.subMsg || result.msg}`)
+    }
+
+    logger.info(
+      { outTradeNo, tradeNo: result.tradeNo },
+      '关闭支付宝订单成功'
+    )
+  } catch (error) {
+    logger.error(error, '关闭支付宝订单异常')
+    throw error
+  }
+}
+
+/**
  * 验证支付宝异步通知签名
  * 文档：https://opendocs.alipay.com/open/270/105902
  *
