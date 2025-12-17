@@ -1,5 +1,12 @@
 import { createEnv } from '@t3-oss/env-nextjs'
+import os from 'os'
 import { z } from 'zod'
+
+/**
+ * CPU count for auto-scaling queue concurrency
+ * Defaults to 4 if detection fails (e.g., in edge runtime)
+ */
+const CPU_COUNT = os.cpus()?.length || 4
 
 export const env = createEnv({
   /*
@@ -33,10 +40,33 @@ export const env = createEnv({
     SEEDREAM_API_KEY: z.string().min(1),
     SEEDREAM_BASE_URL: z.url(),
     SEEDREAM_MODEL: z.string().min(1),
-    SEEDREAM_CONCURRENCY: z.coerce.number().default(20),
 
-    // Queue Configuration
-    QUEUE_CONCURRENCY: z.coerce.number().min(1).max(100).default(5),
+    /**
+     * Global API Concurrency - Controls max concurrent requests to Volcengine
+     *
+     * Volcengine limit: 2000 tasks per minute
+     * With ~10s per request average, optimal concurrency = 2000 / 6 ≈ 333
+     * Default: 300 (with 10% headroom for safety)
+     *
+     * This is a GLOBAL limit shared across all tasks, ensuring we never
+     * exceed Volcengine's rate limits regardless of queue concurrency.
+     */
+    GLOBAL_API_CONCURRENCY: z.coerce.number().min(1).default(300),
+
+    /**
+     * Queue Concurrency - Controls how many tasks process simultaneously
+     *
+     * Auto-calculated based on CPU count: CPU_COUNT * 2
+     * This controls resource usage (memory, DB connections, heartbeat timers)
+     *
+     * The actual API request rate is controlled by GLOBAL_API_CONCURRENCY,
+     * so this primarily affects local resource consumption.
+     */
+    QUEUE_CONCURRENCY: z.coerce
+      .number()
+      .min(1)
+      .max(100)
+      .default(CPU_COUNT * 2),
 
     // Task Enqueue Cron (polls pending tasks and adds to queue)
     CRON_TASK_ENQUEUE_ENABLED: z.coerce.boolean().default(true),

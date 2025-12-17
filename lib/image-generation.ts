@@ -2,21 +2,27 @@
  * Image Generation Service
  *
  * Enterprise-grade image generation with:
- * - Rate limiting to prevent 429 errors
+ * - Global concurrency control via Semaphore (prevents exceeding Volcengine limits)
  * - Exponential backoff retry with jitter
  * - Real timeout control with AbortController
- * - Concurrent request management
  * - Detailed error tracking
  *
  * Uses Seedream4.0 via Volcengine ARK API
+ *
+ * Volcengine limit: 2000 tasks per minute
+ * Controlled by GLOBAL_API_CONCURRENCY (default: 300)
  */
 
 import { Liquid } from 'liquidjs'
 
 import { env } from '@/lib/env'
 import { logger as baseLogger } from '@/lib/logger'
+import { getGlobalApiSemaphore, initGlobalApiSemaphore } from '@/lib/semaphore'
 
 const logger = baseLogger.child({ module: 'lib/image-generation' })
+
+// Initialize global semaphore on module load
+initGlobalApiSemaphore(env.GLOBAL_API_CONCURRENCY)
 
 // ============================================================================
 // Configuration
@@ -38,10 +44,6 @@ const CONFIG = {
   INITIAL_RETRY_DELAY: 2000,
   /** Maximum retry delay in ms (cap for exponential backoff) */
   MAX_RETRY_DELAY: 30000,
-  /** Rate limit: max requests per time window */
-  RATE_LIMIT_MAX_REQUESTS: 20,
-  /** Rate limit: time window in ms */
-  RATE_LIMIT_WINDOW_MS: 1000,
 } as const
 
 // ============================================================================
@@ -73,8 +75,6 @@ export interface GenerateImagesOptions {
   watermark?: boolean
   /** Timeout per batch in seconds */
   timeout?: number
-  /** Maximum concurrent requests */
-  concurrency?: number
 }
 
 export interface GeneratedImage {
@@ -127,71 +127,6 @@ async function renderPrompt(userPrompt: string, templatePrompt?: string): Promis
   } catch (error) {
     logger.error(error, 'Template render failed, falling back to user prompt')
     return userPrompt
-  }
-}
-
-// ============================================================================
-// Rate Limiter (Token Bucket Algorithm)
-// ============================================================================
-
-/**
- * Token bucket rate limiter to prevent API rate limit errors (429)
- *
- * Ensures requests are spread over time instead of bursting.
- * Example: 200 requests spread over 10 seconds instead of instant burst.
- */
-class RateLimiter {
-  private tokens: number
-  private lastRefill: number
-
-  constructor(
-    private maxTokens: number,
-    private refillInterval: number // ms
-  ) {
-    this.tokens = maxTokens
-    this.lastRefill = Date.now()
-  }
-
-  /**
-   * Wait until a token is available, then consume it
-   */
-  async acquire(): Promise<void> {
-    while (true) {
-      this.refill()
-
-      if (this.tokens >= 1) {
-        this.tokens -= 1
-        return
-      }
-
-      // Wait for next refill opportunity
-      const waitTime = Math.min(100, this.refillInterval / this.maxTokens)
-      await new Promise((resolve) => setTimeout(resolve, waitTime))
-    }
-  }
-
-  /**
-   * Refill tokens based on elapsed time
-   */
-  private refill(): void {
-    const now = Date.now()
-    const elapsed = now - this.lastRefill
-
-    if (elapsed >= this.refillInterval) {
-      const tokensToAdd = Math.floor(elapsed / this.refillInterval) * this.maxTokens
-      this.tokens = Math.min(this.maxTokens, this.tokens + tokensToAdd)
-      this.lastRefill = now
-    }
-  }
-
-  /**
-   * Create a rate limiter from requests per time window
-   *
-   * @param maxRequests - Maximum requests allowed per window
-   * @param windowMs - Time window in milliseconds
-   */
-  static fromRequestsPerWindow(maxRequests: number, windowMs: number): RateLimiter {
-    return new RateLimiter(maxRequests, windowMs)
   }
 }
 
@@ -270,10 +205,10 @@ function calculateRetryDelay(attempt: number): number {
  * Generate a single batch (may produce single or multiple images in sequential mode)
  *
  * Features:
+ * - Global semaphore for concurrency control (shared across all tasks)
  * - AbortController for real timeout control
  * - Exponential backoff with jitter
  * - Smart retry (only retryable errors)
- * - Rate limiting via rateLimiter
  * - Supports sequential mode (returns multiple images)
  *
  * @param prompt - Final rendered prompt
@@ -291,7 +226,6 @@ async function generateSingleImage(
     watermark?: boolean
     timeout: number
     index: number
-    rateLimiter: RateLimiter
   }
 ): Promise<GeneratedImage> {
   const {
@@ -303,104 +237,110 @@ async function generateSingleImage(
     watermark,
     timeout,
     index,
-    rateLimiter,
   } = options
+
+  const semaphore = getGlobalApiSemaphore()
   let lastError: Error | null = null
 
   for (let attempt = 1; attempt <= CONFIG.MAX_RETRIES; attempt++) {
     try {
-      logger.info(`Batch ${index + 1}: Attempt ${attempt}/${CONFIG.MAX_RETRIES}`)
+      logger.debug(`Batch ${index + 1}: Attempt ${attempt}/${CONFIG.MAX_RETRIES}, waiting for semaphore...`)
 
-      // Wait for rate limiter token
-      await rateLimiter.acquire()
-
-      // Create abort controller for timeout
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), timeout * 1000)
+      // Wait for global semaphore permit (controls total concurrent requests to Volcengine)
+      await semaphore.acquire()
 
       try {
-        // Build request body
-        const requestBody: Record<string, any> = {
-          model: env.SEEDREAM_MODEL,
-          prompt,
-          response_format: 'url',
-          size,
-          watermark: watermark ?? false,
-        }
-
-        // Add original images for image-to-image or multi-image fusion
-        // 关键修复：单图传字符串，多图传数组
-        if (originalImageUrls && originalImageUrls.length > 0) {
-          if (originalImageUrls.length === 1) {
-            // 单图：传字符串
-            requestBody.image = originalImageUrls[0]
-          } else {
-            // 多图融合：传数组（也支持组图模式）
-            requestBody.image = originalImageUrls
-          }
-        }
-
-        // 组图模式
-        // Add sequential image generation settings
-        if (sequentialImageGeneration) {
-          requestBody.sequential_image_generation = sequentialImageGeneration
-          if (sequentialImageGeneration === 'auto' && sequentialImageGenerationOptions?.maxImages) {
-            requestBody.sequential_image_generation_options = {
-              max_images: sequentialImageGenerationOptions.maxImages,
-            }
-          }
-        }
-
-        // Add optimize prompt options
-        if (optimizePromptOptions?.mode) {
-          requestBody.optimize_prompt_options = {
-            mode: optimizePromptOptions.mode,
-          }
-        }
-
-        // Make HTTP request with timeout
-        const response = await fetch(`${env.SEEDREAM_BASE_URL}/images/generations`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${env.SEEDREAM_API_KEY}`,
-          },
-          body: JSON.stringify(requestBody),
-          signal: controller.signal,
-        })
-
-        clearTimeout(timeoutId)
-
-        // Handle non-OK responses
-        if (!response.ok) {
-          const errorText = await response.text()
-          throw new Error(`API error ${response.status}: ${errorText}`)
-        }
-
-        // Parse response
-        const result: APIResponse = await response.json()
-
-        // 关键修复：提取所有图片 URL（组图模式下可能有多张）
-        const imageUrls =
-          result.data?.map((item) => item.url).filter((url): url is string => !!url) || []
-
-        if (imageUrls.length === 0) {
-          throw new Error('No image URLs in response')
-        }
-
         logger.info(
-          `Batch ${index + 1}: Generated ${imageUrls.length} image(s) successfully (attempt ${attempt})`
+          `Batch ${index + 1}: Attempt ${attempt}/${CONFIG.MAX_RETRIES} (semaphore: ${semaphore.available}/${semaphore.max} available)`
         )
 
-        return {
-          urls: imageUrls,
-          index,
-          success: true,
-          attempts: attempt,
+        // Create abort controller for timeout
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), timeout * 1000)
+
+        try {
+          // Build request body
+          const requestBody: Record<string, any> = {
+            model: env.SEEDREAM_MODEL,
+            prompt,
+            response_format: 'url',
+            size,
+            watermark: watermark ?? false,
+          }
+
+          // Add original images for image-to-image or multi-image fusion
+          if (originalImageUrls && originalImageUrls.length > 0) {
+            if (originalImageUrls.length === 1) {
+              requestBody.image = originalImageUrls[0]
+            } else {
+              requestBody.image = originalImageUrls
+            }
+          }
+
+          // Add sequential image generation settings
+          if (sequentialImageGeneration) {
+            requestBody.sequential_image_generation = sequentialImageGeneration
+            if (sequentialImageGeneration === 'auto' && sequentialImageGenerationOptions?.maxImages) {
+              requestBody.sequential_image_generation_options = {
+                max_images: sequentialImageGenerationOptions.maxImages,
+              }
+            }
+          }
+
+          // Add optimize prompt options
+          if (optimizePromptOptions?.mode) {
+            requestBody.optimize_prompt_options = {
+              mode: optimizePromptOptions.mode,
+            }
+          }
+
+          // Make HTTP request with timeout
+          const response = await fetch(`${env.SEEDREAM_BASE_URL}/images/generations`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${env.SEEDREAM_API_KEY}`,
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          })
+
+          clearTimeout(timeoutId)
+
+          // Handle non-OK responses
+          if (!response.ok) {
+            const errorText = await response.text()
+            throw new Error(`API error ${response.status}: ${errorText}`)
+          }
+
+          // Parse response
+          const result: APIResponse = await response.json()
+
+          // Extract all image URLs (sequential mode may return multiple)
+          const imageUrls =
+            result.data?.map((item) => item.url).filter((url): url is string => !!url) || []
+
+          if (imageUrls.length === 0) {
+            throw new Error('No image URLs in response')
+          }
+
+          logger.info(
+            `Batch ${index + 1}: Generated ${imageUrls.length} image(s) successfully (attempt ${attempt})`
+          )
+
+          return {
+            urls: imageUrls,
+            index,
+            success: true,
+            attempts: attempt,
+          }
+        } catch (error) {
+          clearTimeout(timeoutId)
+          throw error
         }
-      } catch (error) {
-        clearTimeout(timeoutId)
-        throw error
+      } finally {
+        // Always release semaphore permit
+        semaphore.release()
       }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
@@ -438,36 +378,6 @@ async function generateSingleImage(
 }
 
 // ============================================================================
-// Concurrent Execution with Limit
-// ============================================================================
-
-/**
- * Execute tasks with concurrency limit using worker pool pattern
- *
- * @param tasks - Array of async task functions
- * @param concurrency - Maximum concurrent tasks
- * @returns Array of results in same order as tasks
- */
-async function parallelLimit<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
-  const results: T[] = new Array(tasks.length)
-  let index = 0
-
-  const worker = async (): Promise<void> => {
-    while (index < tasks.length) {
-      const currentIndex = index++
-      results[currentIndex] = await tasks[currentIndex]()
-    }
-  }
-
-  // Create worker pool with specified concurrency
-  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker())
-
-  await Promise.all(workers)
-
-  return results
-}
-
-// ============================================================================
 // Main Generation Functions
 // ============================================================================
 
@@ -477,12 +387,14 @@ async function parallelLimit<T>(tasks: Array<() => Promise<T>>, concurrency: num
  * This is the main entry point for image generation.
  *
  * Features:
- * - Concurrent generation with configurable limit
- * - Rate limiting to prevent 429 errors
+ * - Global semaphore controls total concurrent requests to Volcengine
  * - Per-batch retry with exponential backoff
  * - Supports sequential mode (multiple images per batch)
  * - Partial success support (some batches fail, some succeed)
  * - Detailed error tracking
+ *
+ * Concurrency is controlled by GLOBAL_API_CONCURRENCY (default: 300)
+ * All batches are launched simultaneously but the semaphore limits actual concurrency
  *
  * @example
  * const result = await generateImagesDetailed({
@@ -510,13 +422,14 @@ export async function generateImagesDetailed(
     optimizePromptOptions,
     watermark = false,
     timeout = CONFIG.TIMEOUT_SECONDS,
-    concurrency = env.SEEDREAM_CONCURRENCY,
   } = options
 
+  const semaphore = getGlobalApiSemaphore()
   const hasMultipleImages = originalImageUrls && originalImageUrls.length > 1
   const isSequentialMode = sequentialImageGeneration === 'auto'
+
   logger.info(
-    `Starting generation: ${imageCount} batches (concurrency: ${concurrency}, multi-image: ${hasMultipleImages}, sequential: ${isSequentialMode})`
+    `Starting generation: ${imageCount} batches (global concurrency: ${semaphore.max}, multi-image: ${hasMultipleImages}, sequential: ${isSequentialMode})`
   )
   if (hasMultipleImages && isSequentialMode) {
     logger.info(
@@ -528,32 +441,23 @@ export async function generateImagesDetailed(
   const prompt = await renderPrompt(userPrompt, templatePrompt)
   logger.info(`Prompt: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}`)
 
-  // Create rate limiter to prevent 429 errors
-  // Default: 20 requests per second
-  const rateLimiter = RateLimiter.fromRequestsPerWindow(
-    CONFIG.RATE_LIMIT_MAX_REQUESTS,
-    CONFIG.RATE_LIMIT_WINDOW_MS
+  // Create generation tasks - all launched simultaneously
+  // The global semaphore inside generateSingleImage controls actual concurrency
+  const tasks = Array.from({ length: imageCount }, (_, index) =>
+    generateSingleImage(prompt, {
+      originalImageUrls,
+      size,
+      sequentialImageGeneration,
+      sequentialImageGenerationOptions,
+      optimizePromptOptions,
+      watermark,
+      timeout,
+      index,
+    })
   )
 
-  // Create generation tasks
-  const tasks = Array.from(
-    { length: imageCount },
-    (_, index) => () =>
-      generateSingleImage(prompt, {
-        originalImageUrls,
-        size,
-        sequentialImageGeneration,
-        sequentialImageGenerationOptions,
-        optimizePromptOptions,
-        watermark,
-        timeout,
-        index,
-        rateLimiter,
-      })
-  )
-
-  // Execute with concurrency control
-  const results = await parallelLimit(tasks, concurrency)
+  // Execute all tasks - semaphore controls actual concurrency
+  const results = await Promise.all(tasks)
 
   // Flatten results: each batch may have produced multiple images
   const successUrls: string[] = []
@@ -584,8 +488,8 @@ export async function generateImagesDetailed(
   return {
     successUrls,
     failures,
-    totalRequested: imageCount, // 批次数量
-    successCount: totalImagesGenerated, // 实际生成的图片数量
+    totalRequested: imageCount,
+    successCount: totalImagesGenerated,
   }
 }
 
