@@ -1,15 +1,14 @@
 'use client'
 
-import { useActionState } from 'react'
-import { useEffect } from 'react'
+import { useActionState, useEffect } from 'react'
 import { ArrowRight, Loader2 } from 'lucide-react'
 import Image from 'next/image'
 import { toast } from 'sonner'
 
 import { loginAction } from '@/app/actions/auth'
+import { BoxesBackground } from '@/components/ui/boxes-background'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { DominoGrid } from '@/components/ui/domino-grid'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -23,17 +22,16 @@ export default function LoginPage() {
   }, [state])
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center p-4 relative overflow-hidden bg-zinc-50 dark:bg-zinc-950">
+    <div className="flex min-h-screen w-full items-center justify-center p-4 relative overflow-hidden bg-background">
       {/* Background Elements */}
-      <div className="absolute inset-0 z-0">
-        <DominoGrid
-          className="z-0 absolute inset-0 size-full"
-          squareSize={24}
-          gridGap={1}
-          color="#808080"
-          maxOpacity={0.3}
-          rippleSpeed={0.1}
-          rippleDuration={3000}
+      <div className="absolute inset-0 z-0 overflow-hidden bg-background">
+        <BoxesBackground />
+        {/* Radial gradient mask for center focus */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: 'radial-gradient(circle at center, transparent 0%, transparent 30%, var(--background) 70%)',
+          }}
         />
       </div>
 
