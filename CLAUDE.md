@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI-powered image generation platform built with Next.js 16 (App Router), featuring text-to-image and image-to-image generation capabilities. The application includes user authentication, balance management, task queuing, and automated processing with a cron-based worker system.
+This is an AI-powered image generation platform built with Next.js (App Router), featuring text-to-image and image-to-image generation capabilities. The application includes user authentication, balance management, payment integration (WeChat Pay, Alipay), task queuing, and automated processing with a cron-based worker system.
 
 ## Common Commands
 
@@ -45,13 +45,11 @@ docker run -p 3000:3000 image-generation:latest
 docker buildx build --platform linux/amd64,linux/arm64 -t image-generation .
 ```
 
-See **DOCKER.md** for comprehensive deployment guide.
-
 ## Architecture Overview
 
 ### Core Technology Stack
-- **Framework**: Next.js 16 with App Router (React 19.2.0)
-- **Database**: PostgreSQL via Drizzle ORM (v0.44.7)
+- **Framework**: Next.js with App Router (React 19)
+- **Database**: PostgreSQL via Drizzle ORM
 - **Authentication**: Custom JWT-based auth using `jose` library
 - **Styling**: Tailwind CSS v4 with Radix UI components
 - **Forms**: React Hook Form with Zod validation
@@ -59,6 +57,7 @@ See **DOCKER.md** for comprehensive deployment guide.
 - **Queue**: fastq for in-memory task processing
 - **Cron**: croner for scheduled job execution
 - **Storage**: Volcengine TOS (Object Storage)
+- **Payments**: WeChat Pay, Alipay (optional, configurable)
 - **AI Services**:
   - Doubao VLM (ARK SDK) for image analysis
   - Seedream for image generation
@@ -138,15 +137,19 @@ Custom JWT-based authentication (no external services like Clerk/NextAuth):
 
 **Two-Stage Architecture**:
 
-1. **Cron Worker** (`lib/cron.ts`): Runs every 5 seconds
-   - Polls database for tasks with `status='pending'`
-   - Marks pending tasks as `processing` using `SELECT FOR UPDATE SKIP LOCKED` (prevents race conditions)
-   - Enqueues up to `CRON_BATCH_SIZE` tasks per cycle (default: 10)
-   - Resets timed-out tasks (stuck in `processing` > `TASK_TIMEOUT_MINUTES`) back to `pending`
-   - Initialized via `instrumentation.ts` (Next.js 15+ feature)
+1. **Cron Workers** (`lib/cron.ts`): Three separate cron jobs
+   - **Task Enqueue** (configurable interval, default every 5 seconds):
+     - Polls database for tasks with `status='pending'`
+     - Marks pending tasks as `processing` using `SELECT FOR UPDATE SKIP LOCKED`
+     - Enqueues up to `CRON_TASK_ENQUEUE_BATCH_SIZE` tasks per cycle (default: 20)
+   - **Task Timeout Recovery** (configurable interval, default every 30 seconds):
+     - Resets timed-out tasks (stuck in `processing` > `CRON_TASK_TIMEOUT_MINUTES`) back to `pending`
+   - **Order Close** (configurable interval, default every minute):
+     - Closes expired payment orders in WeChat/Alipay
+   - All crons initialized via `instrumentation.ts` (Next.js 15+ feature)
 
 2. **Task Queue** (`lib/queue.ts`): Processes tasks with configurable concurrency
-   - Powered by `fastq` with concurrency controlled by `QUEUE_CONCURRENCY` (default: 5)
+   - Powered by `fastq` with concurrency controlled by `QUEUE_CONCURRENCY` (auto-scales with CPU count)
    - Validates and locks task using `SELECT FOR UPDATE NOWAIT` (prevents double processing)
    - Loads prompt template if specified
    - Generates images via Seedream API (supports partial success)
@@ -161,9 +164,8 @@ Custom JWT-based authentication (no external services like Clerk/NextAuth):
 - Generated images uploaded to TOS: `generatedImage/{userId}/{taskId}/`
 
 **Concurrency Control**:
-- `QUEUE_CONCURRENCY`: Number of tasks processed simultaneously (default: 5)
-- `SEEDREAM_CONCURRENCY`: Number of concurrent image generation requests per task (default: 20)
-- Total concurrent API requests = `QUEUE_CONCURRENCY × SEEDREAM_CONCURRENCY`
+- `QUEUE_CONCURRENCY`: Number of tasks processed simultaneously (default: CPU_COUNT * 2)
+- `GLOBAL_API_CONCURRENCY`: Max concurrent API requests to Volcengine (default: 300, shared across all tasks)
 
 ### Server Actions
 
@@ -196,12 +198,25 @@ Type-safe environment configuration via `@t3-oss/env-nextjs` in `lib/env.ts`:
 - `NODE_ENV`: development | test | production
 - `VOLCENGINE_*`: TOS configuration (ACCESS_KEY, SECRET_KEY, REGION, ENDPOINT, BUCKET_NAME)
 - `ARK_*`: Doubao VLM configuration (API_KEY, BASE_URL, MODEL)
-- `SEEDREAM_*`: Image generation configuration (API_KEY, BASE_URL, MODEL, CONCURRENCY)
-- `QUEUE_CONCURRENCY`: Queue worker concurrency (default: 5)
-- `CRON_BATCH_SIZE`: Tasks to fetch per cron cycle (default: 10)
-- `TASK_TIMEOUT_MINUTES`: Task timeout threshold (default: 30)
+- `SEEDREAM_*`: Image generation configuration (API_KEY, BASE_URL, MODEL)
+
+**Concurrency & Queue Settings**:
+- `QUEUE_CONCURRENCY`: Queue worker concurrency (default: CPU_COUNT * 2, max 100)
+- `GLOBAL_API_CONCURRENCY`: Global API request limit (default: 300)
+- `DB_QUERY_LOGGING`: Enable Drizzle query logging (default: false)
+
+**Cron Job Settings**:
+- `CRON_TASK_ENQUEUE_ENABLED/INTERVAL/BATCH_SIZE`: Task enqueue cron (default: enabled, every 5s, batch 20)
+- `CRON_TASK_TIMEOUT_ENABLED/INTERVAL/MINUTES`: Task timeout recovery (default: enabled, every 30s, 10 min timeout)
+- `CRON_ORDER_CLOSE_ENABLED/INTERVAL/BATCH_SIZE`: Order close cron (default: enabled, every 1min, batch 50)
+
+**Business Settings**:
 - `GIFT_AMOUNT`: New user gift amount (default: 0)
 - `ANALYSIS_PRICE`: VLM analysis price (default: 0)
+
+**Payment Configuration** (optional):
+- `WECHAT_PAY_*`: WeChat Pay integration (APPID, MCHID, API_V3_KEY, SERIAL_NO, PRIVATE_KEY, NOTIFY_URL)
+- `ALIPAY_*`: Alipay integration (APPID, PRIVATE_KEY, PUBLIC_KEY, NOTIFY_URL)
 
 Set `SKIP_ENV_VALIDATION=1` to skip validation during build (e.g., CI/CD).
 
@@ -241,13 +256,13 @@ When modifying database schema:
 
 ### Task Queue Behavior
 
-- Queue processes `QUEUE_CONCURRENCY` tasks simultaneously (default: 5)
-- Cron polls every **5 seconds** for new pending tasks
+- Queue processes `QUEUE_CONCURRENCY` tasks simultaneously (default: CPU_COUNT * 2)
+- Task enqueue cron runs on configurable interval (default: every 5 seconds)
 - Tasks use `SELECT FOR UPDATE NOWAIT` to prevent double processing
 - Failed tasks trigger **automatic refunds** via database transaction
 - Partial success tasks receive **proportional refunds** based on failure count
 - Tasks maintain heartbeat every 5 minutes to prevent timeout
-- Stuck tasks (> `TASK_TIMEOUT_MINUTES`) automatically reset to pending
+- Stuck tasks (> `CRON_TASK_TIMEOUT_MINUTES`) automatically reset to pending by timeout recovery cron
 
 ### Code Style
 
@@ -269,10 +284,10 @@ The cron worker is automatically initialized via `instrumentation.ts`:
 
 1. User creates task via `POST /api/tasks` (charges balance, creates transaction)
 2. Task marked as `pending` in database
-3. Cron worker picks up task and marks as `processing`
+3. Task enqueue cron picks up task and marks as `processing`
 4. Queue worker:
    - Validates task and loads template
-   - Generates images via Seedream API (with `SEEDREAM_CONCURRENCY`)
+   - Generates images via Seedream API (respects `GLOBAL_API_CONCURRENCY` limit)
    - Uploads successful images to TOS
    - Updates task status and refunds if needed
 5. Frontend polls task status every 5 seconds
@@ -288,10 +303,9 @@ Always test database operations with:
 ### Connection Pool Configuration
 
 Database connection pool in `db/index.ts`:
-- **max**: 20 connections (adjust based on QUEUE_CONCURRENCY)
+- **max**: 20 connections
 - **idleTimeoutMillis**: 30 seconds
 - **connectionTimeoutMillis**: 2 seconds
-- Recommended: pool size >= `QUEUE_CONCURRENCY * 3 + 10`
 
 ## CI/CD and Deployment
 
@@ -340,8 +354,6 @@ docker compose up -d        # Start app + PostgreSQL
 curl http://localhost:3000/api/health  # Check health
 ```
 
-See **DOCKER.md** for complete deployment documentation.
-
 ## Troubleshooting
 
 - **Environment variable errors**: Ensure `.env` file exists with all required variables
@@ -351,6 +363,6 @@ See **DOCKER.md** for complete deployment documentation.
 - **Type errors after schema changes**: Restart TypeScript server or run `pnpm build`
 - **Cron not running**: Verify `instrumentation.ts` exists and Next.js version >= 15
 - **Images not uploading**: Verify Volcengine TOS credentials and bucket permissions
-- **Queue overloaded**: Reduce `QUEUE_CONCURRENCY` or `SEEDREAM_CONCURRENCY`
+- **Queue overloaded**: Reduce `QUEUE_CONCURRENCY` or `GLOBAL_API_CONCURRENCY`
 - **Docker build fails**: Check `output: 'standalone'` in `next.config.ts`, verify base image
 - **Health check failing**: Ensure database is accessible from container, check `/api/health` logs

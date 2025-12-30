@@ -19,7 +19,7 @@
     "@floating-ui/react": "^0.27.16",
     "@headlessui/react": "^2.2.9",
     "@hookform/resolvers": "^5.2.2",
-    "@langchain/core": "^1.0.6",
+    "@langchain/core": "^1.1.8",
     "@langchain/openai": "^1.1.2",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -65,7 +65,7 @@
     "input-otp": "^1.4.2",
     "jose": "^6.1.2",
     "jszip": "^3.10.1",
-    "langchain": "^1.0.6",
+    "langchain": "^1.2.3",
     "liquidjs": "^10.24.0",
     "lucide-react": "^0.554.0",
     "motion": "^12.23.24",
@@ -97,7 +97,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
-    "drizzle-kit": "^0.31.7",
+    "drizzle-kit": "^0.31.8",
     "eslint": "^9",
     "eslint-config-next": "16.0.7",
     "eslint-config-prettier": "^10.1.8",
@@ -115,6 +115,7 @@
   "pnpm": {
     "overrides": {
       "axios": ">=0.30.2",
+      "esbuild": ">=0.25.0",
       "@types/react": "19.2.7",
       "@types/react-dom": "19.2.3"
     }
